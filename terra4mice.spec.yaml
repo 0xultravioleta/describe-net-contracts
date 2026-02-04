@@ -1,0 +1,128 @@
+# terra4mice Spec - SealRegistry (describe-net Contracts)
+# Defines desired state for the Foundry-based Solidity project
+
+version: "1"
+
+resources:
+  # Interfaces - define the contract boundaries
+  interface:
+    identity_registry:
+      attributes:
+        description: "IIdentityRegistry - ERC-8004 agent identity interface"
+        language: solidity
+        standard: ERC-8004
+      files:
+        - src/interfaces/IIdentityRegistry.sol
+      depends_on: []
+
+  # Contracts - the main implementations
+  contract:
+    seal_registry:
+      attributes:
+        description: "SealRegistry - Categorical reputation system for describe-net"
+        language: solidity
+        loc: 384
+        features:
+          - seal_issuance_a2h
+          - seal_issuance_h2a
+          - seal_issuance_h2h
+          - seal_issuance_a2a
+          - seal_revocation
+          - agent_seal_domains
+          - seal_queries
+          - score_aggregation
+          - seal_expiry
+        quadrants: [H2H, H2A, A2H, A2A]
+        seal_types: [SKILLFUL, RELIABLE, THOROUGH, ENGAGED, HELPFUL, CURIOUS, FAIR, ACCURATE, RESPONSIVE, ETHICAL, CREATIVE, PROFESSIONAL, FRIENDLY]
+      files:
+        - src/SealRegistry.sol
+      depends_on:
+        - interface.identity_registry
+
+  # Mocks - test helpers
+  mock:
+    identity_registry:
+      attributes:
+        description: "MockIdentityRegistry - Mock for testing without real identity registry"
+        language: solidity
+      files:
+        - src/mocks/MockIdentityRegistry.sol
+      depends_on:
+        - interface.identity_registry
+
+  # Test suites
+  test:
+    seal_registry:
+      attributes:
+        description: "SealRegistry test suite - 21 tests covering all quadrants"
+        language: solidity
+        framework: forge
+        test_count: 21
+        coverage_areas:
+          - a2h_seal_issuance
+          - h2a_seal_issuance
+          - h2h_seal_issuance
+          - a2a_seal_issuance
+          - seal_revocation
+          - agent_domain_registration
+          - score_validation
+          - access_control
+          - seal_queries
+          - edge_cases
+      files:
+        - test/SealRegistry.t.sol
+      depends_on:
+        - contract.seal_registry
+        - mock.identity_registry
+
+  # Deployment scripts
+  deploy:
+    seal_registry:
+      attributes:
+        description: "Deployment script for SealRegistry"
+        language: solidity
+        framework: forge-script
+      files:
+        - script/Deploy.s.sol
+      depends_on:
+        - contract.seal_registry
+        - test.seal_registry
+
+  # Documentation
+  docs:
+    readme:
+      attributes:
+        description: "Project README with architecture, usage, and API docs"
+        sections:
+          - overview
+          - architecture
+          - evaluation_quadrants
+          - seal_types
+          - getting_started
+          - testing
+          - deployment
+          - api_reference
+      files:
+        - README.md
+      depends_on:
+        - contract.seal_registry
+
+  # CI/CD
+  ci:
+    github_actions:
+      attributes:
+        description: "GitHub Actions workflow for automated testing"
+        triggers: [push, pull_request]
+      files:
+        - .github/workflows/test.yml
+      depends_on:
+        - test.seal_registry
+
+  # Config
+  config:
+    foundry:
+      attributes:
+        description: "Foundry project configuration"
+      files:
+        - foundry.toml
+      depends_on: []

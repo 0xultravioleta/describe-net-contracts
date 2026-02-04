@@ -1,0 +1,11 @@
+{
+  "network": "base-sepolia",
+  "chainId": 84532,
+  "deployer": "",
+  "contracts": {
+    "MockIdentityRegistry": "",
+    "SealRegistry": ""
+  },
+  "deployedAt": "",
+  "txHash": ""
+}

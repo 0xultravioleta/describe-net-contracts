@@ -1,0 +1,159 @@
+{
+  "version": "1",
+  "serial": 8,
+  "last_updated": "2026-02-03T03:05:55.826909",
+  "resources": [
+    {
+      "type": "ci",
+      "name": "github_actions",
+      "status": "implemented",
+      "attributes": {
+        "inference_confidence": 0.75,
+        "inference_evidence": [
+          "Explicit files found: ['.github/workflows/test.yml']",
+          "AST analysis: 50% match"
+        ]
+      },
+      "depends_on": [],
+      "files": [
+        ".github/workflows/test.yml"
+      ],
+      "tests": [],
+      "created_at": "2026-02-03T03:05:55.826894",
+      "updated_at": "2026-02-03T03:05:55.826887"
+    },
+    {
+      "type": "config",
+      "name": "foundry",
+      "status": "implemented",
+      "attributes": {
+        "inference_confidence": 0.75,
+        "inference_evidence": [
+          "Explicit files found: ['foundry.toml']",
+          "AST analysis: 50% match"
+        ]
+      },
+      "depends_on": [],
+      "files": [
+        "foundry.toml"
+      ],
+      "tests": [],
+      "created_at": "2026-02-03T03:05:55.826898",
+      "updated_at": "2026-02-03T03:05:55.826898"
+    },
+    {
+      "type": "contract",
+      "name": "seal_registry",
+      "status": "implemented",
+      "attributes": {
+        "inference_confidence": 0.8699999999999999,
+        "inference_evidence": [
+          "Explicit files found: ['src/SealRegistry.sol']",
+          "AST analysis: 90% match"
+        ]
+      },
+      "depends_on": [],
+      "files": [
+        "src/SealRegistry.sol"
+      ],
+      "tests": [],
+      "created_at": "2026-02-03T03:05:55.826901",
+      "updated_at": "2026-02-03T03:05:55.826901"
+    },
+    {
+      "type": "deploy",
+      "name": "seal_registry",
+      "status": "implemented",
+      "attributes": {
+        "inference_confidence": 0.75,
+        "inference_evidence": [
+          "Explicit files found: ['script/Deploy.s.sol']",
+          "AST analysis: 50% match"
+        ]
+      },
+      "depends_on": [],
+      "files": [
+        "script/Deploy.s.sol"
+      ],
+      "tests": [],
+      "created_at": "2026-02-03T03:05:55.826903",
+      "updated_at": "2026-02-03T03:05:55.826902"
+    },
+    {
+      "type": "docs",
+      "name": "readme",
+      "status": "implemented",
+      "attributes": {
+        "inference_confidence": 0.75,
+        "inference_evidence": [
+          "Explicit files found: ['README.md']",
+          "AST analysis: 50% match"
+        ]
+      },
+      "depends_on": [],
+      "files": [
+        "README.md"
+      ],
+      "tests": [],
+      "created_at": "2026-02-03T03:05:55.826904",
+      "updated_at": "2026-02-03T03:05:55.826904"
+    },
+    {
+      "type": "interface",
+      "name": "identity_registry",
+      "status": "implemented",
+      "attributes": {
+        "inference_confidence": 0.8099999999999999,
+        "inference_evidence": [
+          "Explicit files found: ['src/interfaces/IIdentityRegistry.sol']",
+          "AST analysis: 70% match"
+        ]
+      },
+      "depends_on": [],
+      "files": [
+        "src/interfaces/IIdentityRegistry.sol"
+      ],
+      "tests": [],
+      "created_at": "2026-02-03T03:05:55.826906",
+      "updated_at": "2026-02-03T03:05:55.826906"
+    },
+    {
+      "type": "mock",
+      "name": "identity_registry",
+      "status": "implemented",
+      "attributes": {
+        "inference_confidence": 0.8099999999999999,
+        "inference_evidence": [
+          "Explicit files found: ['src/mocks/MockIdentityRegistry.sol']",
+          "AST analysis: 70% match"
+        ]
+      },
+      "depends_on": [],
+      "files": [
+        "src/mocks/MockIdentityRegistry.sol"
+      ],
+      "tests": [],
+      "created_at": "2026-02-03T03:05:55.826907",
+      "updated_at": "2026-02-03T03:05:55.826907"
+    },
+    {
+      "type": "test",
+      "name": "seal_registry",
+      "status": "implemented",
+      "attributes": {
+        "inference_confidence": 0.8999999999999999,
+        "inference_evidence": [
+          "Explicit files found: ['test/SealRegistry.t.sol']",
+          "AST analysis: 100% match"
+        ]
+      },
+      "depends_on": [],
+      "files": [
+        "test/SealRegistry.t.sol"
+      ],
+      "tests": [],
+      "created_at": "2026-02-03T03:05:55.826909",
+      "updated_at": "2026-02-03T03:05:55.826909"
+    }
+  ]
+}

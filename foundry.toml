@@ -8,8 +8,18 @@ optimizer_runs = 200
 remappings = [
     "@openzeppelin/=lib/openzeppelin-contracts/",
 ]
+gas_reports = ["SealRegistry"]
+
+[profile.ci]
+fuzz = { runs = 512 }
+verbosity = 2
 
 [rpc_endpoints]
 base_sepolia = "https://sepolia.base.org"
+base_mainnet = "https://mainnet.base.org"
+
+[etherscan]
+base_sepolia = { key = "${BASESCAN_API_KEY}", url = "https://api-sepolia.basescan.org/api", chain = 84532 }
+base_mainnet = { key = "${BASESCAN_API_KEY}", url = "https://api.basescan.org/api", chain = 8453 }
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options

@@ -1,9 +1,8 @@
 name: CI
 
-permissions: {}
-
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -11,28 +10,113 @@ env:
   FOUNDRY_PROFILE: ci
 
 jobs:
-  check:
-    name: Foundry project
+  build:
+    name: Build
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v4
         with:
-          persist-credentials: false
           submodules: recursive
 
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
 
-      - name: Show Forge version
-        run: forge --version
+      - name: Cache Foundry
+        uses: actions/cache@v4
+        with:
+          path: |
+            cache
+            out
+          key: foundry-build-${{ hashFiles('src/**/*.sol', 'foundry.toml') }}
+          restore-keys: foundry-build-
 
-      - name: Run Forge fmt
-        run: forge fmt --check
-
-      - name: Run Forge build
+      - name: Build
         run: forge build --sizes
 
-      - name: Run Forge tests
+      - name: Check formatting
+        run: forge fmt --check
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Cache Foundry
+        uses: actions/cache@v4
+        with:
+          path: |
+            cache
+            out
+          key: foundry-build-${{ hashFiles('src/**/*.sol', 'foundry.toml') }}
+          restore-keys: foundry-build-
+
+      - name: Run tests
         run: forge test -vvv
+
+  gas:
+    name: Gas Report
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Cache Foundry
+        uses: actions/cache@v4
+        with:
+          path: |
+            cache
+            out
+          key: foundry-build-${{ hashFiles('src/**/*.sol', 'foundry.toml') }}
+          restore-keys: foundry-build-
+
+      - name: Gas report
+        run: forge test --gas-report
+
+      - name: Gas snapshot
+        run: forge snapshot
+
+      - name: Upload gas snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: gas-snapshot
+          path: .gas-snapshot
+
+  snapshot-compare:
+    name: Gas Snapshot Comparison
+    runs-on: ubuntu-latest
+    needs: gas
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          ref: ${{ github.base_ref }}
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Base snapshot
+        run: forge snapshot --snap .gas-snapshot-base
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          clean: false
+
+      - name: PR snapshot
+        run: forge snapshot --snap .gas-snapshot-pr
+
+      - name: Compare snapshots
+        run: forge snapshot --diff .gas-snapshot-base .gas-snapshot-pr || true
