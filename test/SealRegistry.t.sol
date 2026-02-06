@@ -402,4 +402,268 @@ contract SealRegistryTest is Test {
         vm.prank(agent1);
         sealRegistry.registerAgentSealDomains(sealTypes);
     }
+
+    // ============================================================
+    // EDGE CASE TESTS - Expiration, Revocation, Domain, Quadrant
+    // ============================================================
+
+    /// @dev Test expiration at exact boundary timestamp
+    function testExpirationBoundary_ExactTimestamp() public {
+        uint48 expirationTime = uint48(block.timestamp + 1 hours);
+        
+        vm.prank(agent1);
+        uint256 sealId = sealRegistry.issueSealA2H(
+            human1,
+            SKILLFUL,
+            85,
+            EVIDENCE_HASH,
+            expirationTime
+        );
+        
+        // At exactly expiration time, seal should NOT be expired (boundary is >)
+        vm.warp(expirationTime);
+        assertFalse(sealRegistry.isSealExpired(sealId));
+        
+        // One second after expiration, seal SHOULD be expired
+        vm.warp(expirationTime + 1);
+        assertTrue(sealRegistry.isSealExpired(sealId));
+    }
+
+    /// @dev Test seal with expiration set to block.timestamp (immediately expired)
+    function testExpirationEdge_ImmediateExpiration() public {
+        uint48 currentTime = uint48(block.timestamp);
+        
+        vm.prank(agent1);
+        uint256 sealId = sealRegistry.issueSealA2H(
+            human1,
+            SKILLFUL,
+            85,
+            EVIDENCE_HASH,
+            currentTime  // Expires at current time
+        );
+        
+        // At issuance time, not yet expired (condition is >)
+        assertFalse(sealRegistry.isSealExpired(sealId));
+        
+        // Any time after, it's expired
+        vm.warp(currentTime + 1);
+        assertTrue(sealRegistry.isSealExpired(sealId));
+    }
+
+    /// @dev Test isSealExpired on non-existent seal
+    function testExpiration_NonExistentSeal() public {
+        vm.expectRevert(abi.encodeWithSelector(SealRegistry.SealNotFound.selector, 999));
+        sealRegistry.isSealExpired(999);
+    }
+
+    /// @dev Test revoke non-existent seal
+    function testRevoke_NonExistentSeal() public {
+        vm.expectRevert(abi.encodeWithSelector(SealRegistry.SealNotFound.selector, 999));
+        vm.prank(human1);
+        sealRegistry.revokeSeal(999, "Trying to revoke nothing");
+    }
+
+    /// @dev Test self-sealing (human sealing themselves H2H)
+    function testSelfSealing_H2H() public {
+        // Currently no restriction on self-sealing - verify it works
+        vm.prank(human1);
+        uint256 sealId = sealRegistry.issueSealH2H(
+            human1,  // Subject is same as evaluator
+            CREATIVE,
+            100,
+            EVIDENCE_HASH
+        );
+        
+        SealRegistry.Seal memory seal = sealRegistry.getSeal(sealId);
+        assertEq(seal.subject, human1);
+        assertEq(seal.evaluator, human1);
+        assertEq(uint8(seal.quadrant), uint8(SealRegistry.Quadrant.H2H));
+    }
+
+    /// @dev Test score boundary - minimum valid score (0)
+    function testScoreBoundary_MinimumScore() public {
+        vm.prank(human1);
+        uint256 sealId = sealRegistry.issueSealH2H(human2, CREATIVE, 0, EVIDENCE_HASH);
+        
+        SealRegistry.Seal memory seal = sealRegistry.getSeal(sealId);
+        assertEq(seal.score, 0);
+    }
+
+    /// @dev Test score boundary - maximum valid score (100)
+    function testScoreBoundary_MaximumScore() public {
+        vm.prank(human1);
+        uint256 sealId = sealRegistry.issueSealH2H(human2, CREATIVE, 100, EVIDENCE_HASH);
+        
+        SealRegistry.Seal memory seal = sealRegistry.getSeal(sealId);
+        assertEq(seal.score, 100);
+    }
+
+    /// @dev Test empty evidence hash is allowed
+    function testEmptyEvidenceHash() public {
+        vm.prank(human1);
+        uint256 sealId = sealRegistry.issueSealH2H(human2, CREATIVE, 75, bytes32(0));
+        
+        SealRegistry.Seal memory seal = sealRegistry.getSeal(sealId);
+        assertEq(seal.evidenceHash, bytes32(0));
+    }
+
+    /// @dev Test agent cannot issue same seal type multiple times in different domains
+    function testAgentMultipleDomainRegistrations() public {
+        // Register agent2 with different domains
+        vm.startPrank(agent2);
+        
+        bytes32[] memory sealTypes1 = new bytes32[](1);
+        sealTypes1[0] = SKILLFUL;
+        sealRegistry.registerAgentSealDomains(sealTypes1);
+        
+        // Register additional domains - old ones should still be valid
+        bytes32[] memory sealTypes2 = new bytes32[](1);
+        sealTypes2[0] = RELIABLE;
+        sealRegistry.registerAgentSealDomains(sealTypes2);
+        
+        vm.stopPrank();
+        
+        // Both should now be valid
+        assertTrue(sealRegistry.getAgentSealDomains(agent2, SKILLFUL));
+        assertTrue(sealRegistry.getAgentSealDomains(agent2, RELIABLE));
+    }
+
+    /// @dev Test registering invalid seal type in agent domains
+    function testRegisterAgentSealDomains_InvalidSealType() public {
+        bytes32[] memory sealTypes = new bytes32[](2);
+        sealTypes[0] = SKILLFUL;
+        sealTypes[1] = INVALID_SEAL;  // This is not a valid seal type
+        
+        vm.expectRevert(abi.encodeWithSelector(SealRegistry.InvalidSealType.selector, INVALID_SEAL));
+        
+        vm.prank(agent1);
+        sealRegistry.registerAgentSealDomains(sealTypes);
+    }
+
+    /// @dev Test quadrant integrity - verify A2H seals have correct quadrant
+    function testQuadrantIntegrity_A2H() public {
+        vm.prank(agent1);
+        uint256 sealId = sealRegistry.issueSealA2H(human1, SKILLFUL, 85, EVIDENCE_HASH, 0);
+        
+        SealRegistry.Seal memory seal = sealRegistry.getSeal(sealId);
+        assertEq(uint8(seal.quadrant), uint8(SealRegistry.Quadrant.A2H));
+        
+        // Verify evaluator is agent
+        IIdentityRegistry.AgentInfo memory info = identityRegistry.resolveByAddress(seal.evaluator);
+        assertTrue(info.agentId != 0, "Evaluator should be a registered agent");
+    }
+
+    /// @dev Test quadrant integrity - verify H2A seals have correct quadrant
+    function testQuadrantIntegrity_H2A() public {
+        vm.prank(human1);
+        uint256 sealId = sealRegistry.issueSealH2A(AGENT1_ID, FAIR, 90, EVIDENCE_HASH);
+        
+        SealRegistry.Seal memory seal = sealRegistry.getSeal(sealId);
+        assertEq(uint8(seal.quadrant), uint8(SealRegistry.Quadrant.H2A));
+        
+        // Verify subject is an agent
+        IIdentityRegistry.AgentInfo memory info = identityRegistry.resolveByAddress(seal.subject);
+        assertTrue(info.agentId != 0, "Subject should be a registered agent");
+    }
+
+    /// @dev Test sealing to zero address (should be allowed but is edge case)
+    function testSealToZeroAddress() public {
+        vm.prank(human1);
+        uint256 sealId = sealRegistry.issueSealH2H(
+            address(0),  // Zero address as subject
+            CREATIVE,
+            75,
+            EVIDENCE_HASH
+        );
+        
+        SealRegistry.Seal memory seal = sealRegistry.getSeal(sealId);
+        assertEq(seal.subject, address(0));
+    }
+
+    /// @dev Test large number of seals to same subject (gas/storage test)
+    function testManySealsToSameSubject() public {
+        uint256 numSeals = 50;
+        
+        for (uint256 i = 0; i < numSeals; i++) {
+            vm.prank(human1);
+            sealRegistry.issueSealH2H(human2, CREATIVE, uint8(i % 101), EVIDENCE_HASH);
+        }
+        
+        uint256[] memory seals = sealRegistry.getSubjectSeals(human2);
+        assertEq(seals.length, numSeals);
+        assertEq(sealRegistry.totalSeals(), numSeals);
+    }
+
+    /// @dev Test revoked seal can still be queried (data persists)
+    function testRevokedSealDataPersists() public {
+        vm.prank(human1);
+        uint256 sealId = sealRegistry.issueSealH2H(human2, CREATIVE, 85, EVIDENCE_HASH);
+        
+        vm.prank(human1);
+        sealRegistry.revokeSeal(sealId, "Changed my mind");
+        
+        // Seal data should still be accessible
+        SealRegistry.Seal memory seal = sealRegistry.getSeal(sealId);
+        assertEq(seal.score, 85);
+        assertEq(seal.subject, human2);
+        assertTrue(seal.revoked);
+        
+        // Should still appear in subject's seal list
+        uint256[] memory seals = sealRegistry.getSubjectSeals(human2);
+        assertEq(seals.length, 1);
+        assertEq(seals[0], sealId);
+    }
+
+    /// @dev Test expired seal data persists and is still queryable
+    function testExpiredSealDataPersists() public {
+        uint48 expirationTime = uint48(block.timestamp + 1 hours);
+        
+        vm.prank(agent1);
+        uint256 sealId = sealRegistry.issueSealA2H(human1, SKILLFUL, 92, EVIDENCE_HASH, expirationTime);
+        
+        vm.warp(block.timestamp + 2 hours);
+        
+        // Seal should be expired
+        assertTrue(sealRegistry.isSealExpired(sealId));
+        
+        // But data should persist
+        SealRegistry.Seal memory seal = sealRegistry.getSeal(sealId);
+        assertEq(seal.score, 92);
+        assertEq(seal.sealType, SKILLFUL);
+        assertEq(seal.expiresAt, expirationTime);
+    }
+
+    /// @dev Test fuzz - score validation
+    function testFuzz_ScoreValidation(uint8 score) public {
+        if (score > 100) {
+            vm.expectRevert(abi.encodeWithSelector(SealRegistry.InvalidScore.selector, score));
+        }
+        
+        vm.prank(human1);
+        sealRegistry.issueSealH2H(human2, CREATIVE, score, EVIDENCE_HASH);
+    }
+
+    /// @dev Test that different agents can issue seals for same type independently
+    function testMultipleAgentsSameSealType() public {
+        // Register agent2 with SKILLFUL domain
+        vm.prank(agent2);
+        bytes32[] memory sealTypes = new bytes32[](1);
+        sealTypes[0] = SKILLFUL;
+        sealRegistry.registerAgentSealDomains(sealTypes);
+        
+        // Both agents issue SKILLFUL seals
+        vm.prank(agent1);
+        uint256 seal1 = sealRegistry.issueSealA2H(human1, SKILLFUL, 85, EVIDENCE_HASH, 0);
+        
+        vm.prank(agent2);
+        uint256 seal2 = sealRegistry.issueSealA2H(human1, SKILLFUL, 90, EVIDENCE_HASH, 0);
+        
+        // Both seals should exist
+        assertEq(sealRegistry.getSeal(seal1).evaluator, agent1);
+        assertEq(sealRegistry.getSeal(seal2).evaluator, agent2);
+        
+        // Human1 should have 2 SKILLFUL seals
+        uint256[] memory skillfulSeals = sealRegistry.getSubjectSealsByType(human1, SKILLFUL);
+        assertEq(skillfulSeals.length, 2);
+    }
 }

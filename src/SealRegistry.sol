@@ -97,12 +97,33 @@ contract SealRegistry is Ownable {
     event AgentDomainsUpdated(address indexed agent, bytes32[] sealTypes);
 
     /// @dev Custom errors
+    
+    /// @notice Thrown when attempting to use an unrecognized seal type
+    /// @param sealType The invalid seal type hash that was provided
     error InvalidSealType(bytes32 sealType);
+    
+    /// @notice Thrown when a score exceeds the maximum allowed value of 100
+    /// @param score The invalid score that was provided
     error InvalidScore(uint8 score);
+    
+    /// @notice Thrown when a non-evaluator attempts to modify a seal they didn't issue
     error UnauthorizedEvaluator();
+    
+    /// @notice Thrown when attempting to access a seal that doesn't exist
+    /// @param sealId The seal ID that was not found
     error SealNotFound(uint256 sealId);
+    
+    /// @notice Thrown when attempting to revoke a seal that is already revoked
+    /// @param sealId The seal ID that was already revoked
     error SealAlreadyRevoked(uint256 sealId);
+    
+    /// @notice Thrown when a non-registered agent attempts agent-only operations
+    /// @param agent The address that is not registered as an agent
     error AgentNotRegistered(address agent);
+    
+    /// @notice Thrown when an agent attempts to issue a seal type outside their registered domains
+    /// @param agent The agent address attempting the operation
+    /// @param sealType The seal type the agent is not authorized for
     error AgentNotAuthorizedForSealType(address agent, bytes32 sealType);
 
     /**
@@ -139,12 +160,14 @@ contract SealRegistry is Ownable {
     }
 
     /**
-     * @dev Agent issues seal to human (A→H)
+     * @notice Agent issues seal to human (A→H quadrant)
+     * @dev Only registered agents can call this. Agent must have the sealType in their registered domains.
      * @param subject Address of the human receiving the seal
-     * @param sealType Type of seal being issued
-     * @param score Score from 0-100
-     * @param evidenceHash Hash of evidence supporting the seal
-     * @param expiresAt Expiration timestamp (0 for never expires)
+     * @param sealType Type of seal being issued (must be a valid seal type)
+     * @param score Score from 0-100 representing strength of the evaluation
+     * @param evidenceHash Hash of evidence supporting the seal (e.g., IPFS CID)
+     * @param expiresAt Expiration timestamp (0 for never expires). Seal expires when block.timestamp > expiresAt
+     * @return sealId The unique identifier assigned to the new seal
      */
     function issueSealA2H(
         address subject,
@@ -169,11 +192,13 @@ contract SealRegistry is Ownable {
     }
 
     /**
-     * @dev Human issues seal to agent (H→A)
-     * @param agentId ID of the agent receiving the seal
-     * @param sealType Type of seal being issued
-     * @param score Score from 0-100
-     * @param evidenceHash Hash of evidence supporting the seal
+     * @notice Human issues seal to agent (H→A quadrant)
+     * @dev Any address can call this to evaluate a registered agent. Seals in this quadrant never expire.
+     * @param agentId ID of the agent receiving the seal (must exist in IdentityRegistry)
+     * @param sealType Type of seal being issued (must be a valid seal type)
+     * @param score Score from 0-100 representing strength of the evaluation
+     * @param evidenceHash Hash of evidence supporting the seal (e.g., IPFS CID)
+     * @return sealId The unique identifier assigned to the new seal
      */
     function issueSealH2A(
         uint256 agentId,
@@ -192,11 +217,13 @@ contract SealRegistry is Ownable {
     }
 
     /**
-     * @dev Human issues seal to human (H→H)
-     * @param subject Address of the human receiving the seal
-     * @param sealType Type of seal being issued
-     * @param score Score from 0-100
-     * @param evidenceHash Hash of evidence supporting the seal
+     * @notice Human issues seal to human (H→H quadrant)
+     * @dev Any address can call this. No restrictions on subject address. Seals in this quadrant never expire.
+     * @param subject Address of the human receiving the seal (can be any address including self)
+     * @param sealType Type of seal being issued (must be a valid seal type)
+     * @param score Score from 0-100 representing strength of the evaluation
+     * @param evidenceHash Hash of evidence supporting the seal (e.g., IPFS CID)
+     * @return sealId The unique identifier assigned to the new seal
      */
     function issueSealH2H(
         address subject,
@@ -212,6 +239,14 @@ contract SealRegistry is Ownable {
 
     /**
      * @dev Internal function to issue a seal
+     * @param subject Address of the entity receiving the seal
+     * @param evaluator Address of the entity issuing the seal
+     * @param sealType Type identifier for the seal
+     * @param quadrant Direction of evaluation (H2H, H2A, A2H, A2A)
+     * @param evidenceHash Hash of evidence supporting the seal (can be bytes32(0))
+     * @param score Score from 0-100 representing the strength of the seal
+     * @param expiresAt Expiration timestamp (0 = never expires)
+     * @return sealId The unique identifier assigned to the new seal
      */
     function _issueSeal(
         address subject,
@@ -243,9 +278,11 @@ contract SealRegistry is Ownable {
     }
 
     /**
-     * @dev Revoke a seal (only by evaluator)
-     * @param sealId ID of the seal to revoke
-     * @param reason Reason for revocation
+     * @notice Revoke a previously issued seal
+     * @dev Only the original evaluator can revoke their seal. Revocation is permanent and cannot be undone.
+     *      The seal data persists after revocation but is marked as revoked.
+     * @param sealId ID of the seal to revoke (must exist and not already be revoked)
+     * @param reason Human-readable reason for revocation (emitted in event)
      */
     function revokeSeal(uint256 sealId, string calldata reason) external {
         Seal storage seal = _seals[sealId];
