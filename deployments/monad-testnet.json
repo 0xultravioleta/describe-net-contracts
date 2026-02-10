@@ -1,0 +1,18 @@
+{
+  "network": "Monad Testnet",
+  "chainId": 10143,
+  "rpcUrl": "https://testnet-rpc.monad.xyz",
+  "deployedAt": "2026-02-10T06:05:00Z",
+  "deployer": "0xD3868E1eD738CED6945A574a7c769433BeD5d474",
+  "contracts": {
+    "MockIdentityRegistry": {
+      "address": "0xdF93dA72C2B58A8436C5bA7cC6DDc9101D680D96",
+      "description": "Mock ERC-8004 identity registry for testnet"
+    },
+    "SealRegistry": {
+      "address": "0xAb06ADC19cb16728bd53755B412BadeE73335D10",
+      "description": "Four-quadrant reputation registry (H→H, H→A, A→H, A→A)"
+    }
+  },
+  "notes": "Deployed for Moltiverse Hackathon (Feb 2-15, 2026). describe-net provides portable reputation via SealRegistry, compatible with ERC-8004."
+}
