@@ -779,45 +779,26 @@ contract SealRegistryTest is Test {
     }
 
     // ============================================================
-    // Batch Operations Tests
+    // Batch Operations Tests (struct-based API)
     // ============================================================
+
+    /// @dev Helper to create a BatchSealParams
+    function _bp(
+        address subject, bytes32 sealType, SealRegistry.Quadrant q,
+        uint8 score, bytes32 ev, uint48 exp
+    ) internal pure returns (SealRegistry.BatchSealParams memory) {
+        return SealRegistry.BatchSealParams(subject, sealType, q, score, ev, exp);
+    }
 
     /// @dev Test batch seal issuance (H2H)
     function testBatchIssueSeal_H2H() public {
-        address[] memory subjects = new address[](3);
-        subjects[0] = human2;
-        subjects[1] = human2;
-        subjects[2] = agent1;
-
-        bytes32[] memory types = new bytes32[](3);
-        types[0] = CREATIVE;
-        types[1] = keccak256("PROFESSIONAL");
-        types[2] = keccak256("FRIENDLY");
-
-        SealRegistry.Quadrant[] memory quads = new SealRegistry.Quadrant[](3);
-        quads[0] = SealRegistry.Quadrant.H2H;
-        quads[1] = SealRegistry.Quadrant.H2H;
-        quads[2] = SealRegistry.Quadrant.H2H;
-
-        uint8[] memory scores = new uint8[](3);
-        scores[0] = 85;
-        scores[1] = 90;
-        scores[2] = 77;
-
-        bytes32[] memory evidences = new bytes32[](3);
-        evidences[0] = keccak256("ev1");
-        evidences[1] = keccak256("ev2");
-        evidences[2] = keccak256("ev3");
-
-        uint48[] memory expires = new uint48[](3);
-        expires[0] = 0;
-        expires[1] = 0;
-        expires[2] = 0;
+        SealRegistry.BatchSealParams[] memory params = new SealRegistry.BatchSealParams[](3);
+        params[0] = _bp(human2, CREATIVE, SealRegistry.Quadrant.H2H, 85, keccak256("ev1"), 0);
+        params[1] = _bp(human2, keccak256("PROFESSIONAL"), SealRegistry.Quadrant.H2H, 90, keccak256("ev2"), 0);
+        params[2] = _bp(agent1, keccak256("FRIENDLY"), SealRegistry.Quadrant.H2H, 77, keccak256("ev3"), 0);
 
         vm.prank(human1);
-        uint256[] memory sealIds = sealRegistry.batchIssueSeal(
-            subjects, types, quads, scores, evidences, expires
-        );
+        uint256[] memory sealIds = sealRegistry.batchIssueSeal(params);
 
         assertEq(sealIds.length, 3);
         assertEq(sealRegistry.getSeal(sealIds[0]).score, 85);
@@ -827,82 +808,25 @@ contract SealRegistryTest is Test {
 
     /// @dev Test batch with agent quadrants (A2H)
     function testBatchIssueSeal_AgentQuadrant() public {
-        address[] memory subjects = new address[](2);
-        subjects[0] = human1;
-        subjects[1] = human2;
-
-        bytes32[] memory types = new bytes32[](2);
-        types[0] = SKILLFUL;
-        types[1] = RELIABLE;
-
-        SealRegistry.Quadrant[] memory quads = new SealRegistry.Quadrant[](2);
-        quads[0] = SealRegistry.Quadrant.A2H;
-        quads[1] = SealRegistry.Quadrant.A2H;
-
-        uint8[] memory scores = new uint8[](2);
-        scores[0] = 92;
-        scores[1] = 88;
-
-        bytes32[] memory evidences = new bytes32[](2);
-        evidences[0] = keccak256("task1");
-        evidences[1] = keccak256("task2");
-
-        uint48[] memory expires = new uint48[](2);
-        expires[0] = 0;
-        expires[1] = 0;
+        SealRegistry.BatchSealParams[] memory params = new SealRegistry.BatchSealParams[](2);
+        params[0] = _bp(human1, SKILLFUL, SealRegistry.Quadrant.A2H, 92, keccak256("task1"), 0);
+        params[1] = _bp(human2, RELIABLE, SealRegistry.Quadrant.A2H, 88, keccak256("task2"), 0);
 
         vm.prank(agent1);
-        uint256[] memory sealIds = sealRegistry.batchIssueSeal(
-            subjects, types, quads, scores, evidences, expires
-        );
+        uint256[] memory sealIds = sealRegistry.batchIssueSeal(params);
 
         assertEq(sealIds.length, 2);
         assertEq(uint8(sealRegistry.getSeal(sealIds[0]).quadrant), uint8(SealRegistry.Quadrant.A2H));
         assertEq(uint8(sealRegistry.getSeal(sealIds[1]).quadrant), uint8(SealRegistry.Quadrant.A2H));
     }
 
-    /// @dev Test batch with mismatched array lengths
-    function testBatchIssueSeal_LengthMismatch() public {
-        address[] memory subjects = new address[](2);
-        subjects[0] = human1;
-        subjects[1] = human2;
-
-        bytes32[] memory types = new bytes32[](1); // Different length!
-        types[0] = CREATIVE;
-
-        SealRegistry.Quadrant[] memory quads = new SealRegistry.Quadrant[](2);
-        quads[0] = SealRegistry.Quadrant.H2H;
-        quads[1] = SealRegistry.Quadrant.H2H;
-
-        uint8[] memory scores = new uint8[](2);
-        scores[0] = 85;
-        scores[1] = 90;
-
-        bytes32[] memory evidences = new bytes32[](2);
-        evidences[0] = EVIDENCE_HASH;
-        evidences[1] = EVIDENCE_HASH;
-
-        uint48[] memory expires = new uint48[](2);
-        expires[0] = 0;
-        expires[1] = 0;
-
-        vm.prank(human1);
-        vm.expectRevert(SealRegistry.BatchLengthMismatch.selector);
-        sealRegistry.batchIssueSeal(subjects, types, quads, scores, evidences, expires);
-    }
-
     /// @dev Test batch with empty arrays
     function testBatchIssueSeal_EmptyBatch() public {
-        address[] memory subjects = new address[](0);
-        bytes32[] memory types = new bytes32[](0);
-        SealRegistry.Quadrant[] memory quads = new SealRegistry.Quadrant[](0);
-        uint8[] memory scores = new uint8[](0);
-        bytes32[] memory evidences = new bytes32[](0);
-        uint48[] memory expires = new uint48[](0);
+        SealRegistry.BatchSealParams[] memory params = new SealRegistry.BatchSealParams[](0);
 
         vm.prank(human1);
         vm.expectRevert(abi.encodeWithSelector(SealRegistry.BatchSizeInvalid.selector, 0));
-        sealRegistry.batchIssueSeal(subjects, types, quads, scores, evidences, expires);
+        sealRegistry.batchIssueSeal(params);
     }
 
     // ============================================================
@@ -1042,5 +966,555 @@ contract SealRegistryTest is Test {
 
         uint256[] memory a2aSeals = sealRegistry.getSubjectSealsByQuadrant(agent1, SealRegistry.Quadrant.A2A);
         assertEq(a2aSeals.length, 0);
+    }
+
+    // ============================================================
+    //              DELEGATION SYSTEM TESTS
+    // ============================================================
+
+    /// @dev Test delegation grant and seal issuance by delegate (happy path)
+    function testDelegation_HappyPath() public {
+        address delegate1 = makeAddr("delegate1");
+        
+        // Agent1 delegates SKILLFUL and RELIABLE to delegate1
+        vm.startPrank(agent1);
+        bytes32[] memory delegatedTypes = new bytes32[](2);
+        delegatedTypes[0] = SKILLFUL;
+        delegatedTypes[1] = RELIABLE;
+        sealRegistry.delegateSealAuthority(delegate1, delegatedTypes, 0); // never expires
+        vm.stopPrank();
+        
+        // Verify delegation is active
+        assertTrue(sealRegistry.isDelegationActive(agent1, delegate1));
+        assertTrue(sealRegistry.isDelegateAuthorizedForType(agent1, delegate1, SKILLFUL));
+        assertTrue(sealRegistry.isDelegateAuthorizedForType(agent1, delegate1, RELIABLE));
+        assertFalse(sealRegistry.isDelegateAuthorizedForType(agent1, delegate1, FAIR));
+        
+        // Delegate1 issues seal as delegate of agent1
+        vm.prank(delegate1);
+        uint256 sealId = sealRegistry.issueSealAsDelegate(
+            agent1, human1, SKILLFUL, SealRegistry.Quadrant.A2H, 85, EVIDENCE_HASH, 0
+        );
+        
+        // Verify seal was created with delegate as evaluator
+        SealRegistry.Seal memory seal = sealRegistry.getSeal(sealId);
+        assertEq(seal.evaluator, delegate1);
+        assertEq(seal.subject, human1);
+        assertEq(seal.score, 85);
+    }
+
+    /// @dev Test delegation with expiration
+    function testDelegation_Expiration() public {
+        address delegate1 = makeAddr("delegate1");
+        uint48 expiry = uint48(block.timestamp + 1 hours);
+        
+        vm.startPrank(agent1);
+        bytes32[] memory delegatedTypes = new bytes32[](1);
+        delegatedTypes[0] = SKILLFUL;
+        sealRegistry.delegateSealAuthority(delegate1, delegatedTypes, expiry);
+        vm.stopPrank();
+        
+        // Before expiry: works
+        assertTrue(sealRegistry.isDelegationActive(agent1, delegate1));
+        
+        // After expiry: fails
+        vm.warp(block.timestamp + 2 hours);
+        assertFalse(sealRegistry.isDelegationActive(agent1, delegate1));
+        
+        // Trying to issue seal as expired delegate should revert
+        vm.prank(delegate1);
+        vm.expectRevert(SealRegistry.DelegationNotActive.selector);
+        sealRegistry.issueSealAsDelegate(
+            agent1, human1, SKILLFUL, SealRegistry.Quadrant.A2H, 85, EVIDENCE_HASH, 0
+        );
+    }
+
+    /// @dev Test delegation revocation
+    function testDelegation_Revocation() public {
+        address delegate1 = makeAddr("delegate1");
+        
+        vm.startPrank(agent1);
+        bytes32[] memory delegatedTypes = new bytes32[](1);
+        delegatedTypes[0] = SKILLFUL;
+        sealRegistry.delegateSealAuthority(delegate1, delegatedTypes, 0);
+        
+        // Verify active
+        assertTrue(sealRegistry.isDelegationActive(agent1, delegate1));
+        
+        // Revoke
+        sealRegistry.revokeDelegation(delegate1);
+        vm.stopPrank();
+        
+        assertFalse(sealRegistry.isDelegationActive(agent1, delegate1));
+        
+        // Try to issue seal → should fail
+        vm.prank(delegate1);
+        vm.expectRevert(SealRegistry.DelegationNotActive.selector);
+        sealRegistry.issueSealAsDelegate(
+            agent1, human1, SKILLFUL, SealRegistry.Quadrant.A2H, 85, EVIDENCE_HASH, 0
+        );
+    }
+
+    /// @dev Test self-delegation is not allowed
+    function testDelegation_SelfNotAllowed() public {
+        vm.startPrank(agent1);
+        bytes32[] memory delegatedTypes = new bytes32[](1);
+        delegatedTypes[0] = SKILLFUL;
+        
+        vm.expectRevert(SealRegistry.SelfDelegationNotAllowed.selector);
+        sealRegistry.delegateSealAuthority(agent1, delegatedTypes, 0);
+        vm.stopPrank();
+    }
+
+    /// @dev Test non-agent cannot delegate
+    function testDelegation_NonAgentCannotDelegate() public {
+        vm.startPrank(human1);
+        bytes32[] memory delegatedTypes = new bytes32[](1);
+        delegatedTypes[0] = SKILLFUL;
+        
+        vm.expectRevert(abi.encodeWithSelector(SealRegistry.AgentNotRegistered.selector, human1));
+        sealRegistry.delegateSealAuthority(makeAddr("del"), delegatedTypes, 0);
+        vm.stopPrank();
+    }
+
+    /// @dev Test cannot delegate seal types not in own domains
+    function testDelegation_CannotDelegateUnauthorizedTypes() public {
+        // Agent1 only has SKILLFUL, RELIABLE, THOROUGH — not FAIR
+        vm.startPrank(agent1);
+        bytes32[] memory delegatedTypes = new bytes32[](1);
+        delegatedTypes[0] = FAIR;
+        
+        vm.expectRevert(abi.encodeWithSelector(
+            SealRegistry.AgentNotAuthorizedForSealType.selector, agent1, FAIR
+        ));
+        sealRegistry.delegateSealAuthority(makeAddr("del"), delegatedTypes, 0);
+        vm.stopPrank();
+    }
+
+    /// @dev Test delegate cannot issue unauthorized seal type
+    function testDelegation_DelegateUnauthorizedType() public {
+        address delegate1 = makeAddr("delegate1");
+        
+        // Delegate only SKILLFUL
+        vm.startPrank(agent1);
+        bytes32[] memory delegatedTypes = new bytes32[](1);
+        delegatedTypes[0] = SKILLFUL;
+        sealRegistry.delegateSealAuthority(delegate1, delegatedTypes, 0);
+        vm.stopPrank();
+        
+        // Try issuing RELIABLE (not delegated)
+        vm.prank(delegate1);
+        vm.expectRevert(abi.encodeWithSelector(
+            SealRegistry.DelegateNotAuthorizedForSealType.selector, delegate1, RELIABLE
+        ));
+        sealRegistry.issueSealAsDelegate(
+            agent1, human1, RELIABLE, SealRegistry.Quadrant.A2H, 85, EVIDENCE_HASH, 0
+        );
+    }
+
+    /// @dev Test revoking non-existent delegation
+    function testDelegation_RevokeNonExistent() public {
+        vm.prank(agent1);
+        vm.expectRevert(SealRegistry.DelegationNotActive.selector);
+        sealRegistry.revokeDelegation(makeAddr("nobody"));
+    }
+
+    // ============================================================
+    //          EIP-712 META-TRANSACTION TESTS
+    // ============================================================
+
+    /// @dev Helper: create a private key and corresponding address
+    uint256 constant SIGNER_PK = 0xBEEF;
+    address signerAddr; // set in setUp or test
+    
+    /// @dev Helper: sign a MetaTxParams struct using EIP-712
+    function _signMetaTx(
+        SealRegistry.MetaTxParams memory params,
+        uint256 privateKey
+    ) internal view returns (bytes memory) {
+        bytes32 structHash = keccak256(abi.encode(
+            sealRegistry.SEAL_TYPEHASH(),
+            params.subject,
+            params.sealType,
+            params.quadrant,
+            params.score,
+            params.evidenceHash,
+            params.expiresAt,
+            params.nonce,
+            params.deadline
+        ));
+        
+        bytes32 digest = keccak256(abi.encodePacked(
+            "\x19\x01",
+            sealRegistry.DOMAIN_SEPARATOR(),
+            structHash
+        ));
+        
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, digest);
+        return abi.encodePacked(r, s, v);
+    }
+
+    /// @dev Test meta-transaction seal submission (H2H, happy path)
+    function testMetaTx_H2H_HappyPath() public {
+        uint256 pk = 0xA11CE;
+        address signer = vm.addr(pk);
+        
+        SealRegistry.MetaTxParams memory params = SealRegistry.MetaTxParams({
+            subject: human2,
+            sealType: CREATIVE,
+            quadrant: uint8(SealRegistry.Quadrant.H2H),
+            score: 88,
+            evidenceHash: EVIDENCE_HASH,
+            expiresAt: 0,
+            nonce: 0,
+            deadline: block.timestamp + 1 hours
+        });
+        
+        bytes memory sig = _signMetaTx(params, pk);
+        
+        // Anyone (relayer) can submit
+        vm.prank(human1);
+        uint256 sealId = sealRegistry.submitSealWithSignature(params, sig);
+        
+        SealRegistry.Seal memory seal = sealRegistry.getSeal(sealId);
+        assertEq(seal.evaluator, signer);
+        assertEq(seal.subject, human2);
+        assertEq(seal.score, 88);
+        assertEq(uint8(seal.quadrant), uint8(SealRegistry.Quadrant.H2H));
+        
+        // Nonce should be incremented
+        assertEq(sealRegistry.nonces(signer), 1);
+    }
+
+    /// @dev Test meta-transaction for agent quadrant (A2H)
+    function testMetaTx_A2H_AgentSeal() public {
+        // Use agent1's actual private key — we need to set one up
+        uint256 agentPk = 0xA6E1;
+        address agentSigner = vm.addr(agentPk);
+        
+        // Register this signer as an agent
+        vm.prank(owner);
+        identityRegistry.addAgent(100, "metatx-agent.com", agentSigner);
+        
+        // Register seal domains
+        vm.startPrank(agentSigner);
+        bytes32[] memory domains = new bytes32[](1);
+        domains[0] = SKILLFUL;
+        sealRegistry.registerAgentSealDomains(domains);
+        vm.stopPrank();
+        
+        SealRegistry.MetaTxParams memory params = SealRegistry.MetaTxParams({
+            subject: human1,
+            sealType: SKILLFUL,
+            quadrant: uint8(SealRegistry.Quadrant.A2H),
+            score: 95,
+            evidenceHash: EVIDENCE_HASH,
+            expiresAt: 0,
+            nonce: 0,
+            deadline: block.timestamp + 1 hours
+        });
+        
+        bytes memory sig = _signMetaTx(params, agentPk);
+        
+        // Relayer submits
+        vm.prank(human2);
+        uint256 sealId = sealRegistry.submitSealWithSignature(params, sig);
+        
+        SealRegistry.Seal memory seal = sealRegistry.getSeal(sealId);
+        assertEq(seal.evaluator, agentSigner);
+        assertEq(seal.score, 95);
+        assertEq(uint8(seal.quadrant), uint8(SealRegistry.Quadrant.A2H));
+    }
+
+    /// @dev Test meta-transaction with expired deadline
+    function testMetaTx_ExpiredDeadline() public {
+        uint256 pk = 0xA11CE;
+        
+        SealRegistry.MetaTxParams memory params = SealRegistry.MetaTxParams({
+            subject: human2,
+            sealType: CREATIVE,
+            quadrant: uint8(SealRegistry.Quadrant.H2H),
+            score: 80,
+            evidenceHash: EVIDENCE_HASH,
+            expiresAt: 0,
+            nonce: 0,
+            deadline: block.timestamp - 1 // already expired
+        });
+        
+        bytes memory sig = _signMetaTx(params, pk);
+        
+        vm.expectRevert(SealRegistry.DeadlineExpired.selector);
+        sealRegistry.submitSealWithSignature(params, sig);
+    }
+
+    /// @dev Test meta-transaction with wrong nonce
+    function testMetaTx_WrongNonce() public {
+        uint256 pk = 0xA11CE;
+        
+        SealRegistry.MetaTxParams memory params = SealRegistry.MetaTxParams({
+            subject: human2,
+            sealType: CREATIVE,
+            quadrant: uint8(SealRegistry.Quadrant.H2H),
+            score: 80,
+            evidenceHash: EVIDENCE_HASH,
+            expiresAt: 0,
+            nonce: 99, // wrong nonce
+            deadline: block.timestamp + 1 hours
+        });
+        
+        bytes memory sig = _signMetaTx(params, pk);
+        
+        vm.expectRevert(SealRegistry.InvalidNonce.selector);
+        sealRegistry.submitSealWithSignature(params, sig);
+    }
+
+    /// @dev Test meta-transaction nonce increments correctly (replay protection)
+    function testMetaTx_NonceReplayProtection() public {
+        uint256 pk = 0xA11CE;
+        address signer = vm.addr(pk);
+        
+        // First submission (nonce 0)
+        SealRegistry.MetaTxParams memory params1 = SealRegistry.MetaTxParams({
+            subject: human2,
+            sealType: CREATIVE,
+            quadrant: uint8(SealRegistry.Quadrant.H2H),
+            score: 80,
+            evidenceHash: EVIDENCE_HASH,
+            expiresAt: 0,
+            nonce: 0,
+            deadline: block.timestamp + 1 hours
+        });
+        bytes memory sig1 = _signMetaTx(params1, pk);
+        sealRegistry.submitSealWithSignature(params1, sig1);
+        assertEq(sealRegistry.nonces(signer), 1);
+        
+        // Replay same signature → fails (nonce already used)
+        vm.expectRevert(SealRegistry.InvalidNonce.selector);
+        sealRegistry.submitSealWithSignature(params1, sig1);
+        
+        // Second submission (nonce 1) works
+        SealRegistry.MetaTxParams memory params2 = SealRegistry.MetaTxParams({
+            subject: human2,
+            sealType: CREATIVE,
+            quadrant: uint8(SealRegistry.Quadrant.H2H),
+            score: 90,
+            evidenceHash: keccak256("ev2"),
+            expiresAt: 0,
+            nonce: 1,
+            deadline: block.timestamp + 1 hours
+        });
+        bytes memory sig2 = _signMetaTx(params2, pk);
+        sealRegistry.submitSealWithSignature(params2, sig2);
+        assertEq(sealRegistry.nonces(signer), 2);
+    }
+
+    /// @dev Test meta-transaction A2H requires registered agent
+    function testMetaTx_A2H_NonAgentReverts() public {
+        uint256 pk = 0xDEAD; // not registered as agent
+        address signer = vm.addr(pk);
+        
+        SealRegistry.MetaTxParams memory params = SealRegistry.MetaTxParams({
+            subject: human1,
+            sealType: SKILLFUL,
+            quadrant: uint8(SealRegistry.Quadrant.A2H),
+            score: 80,
+            evidenceHash: EVIDENCE_HASH,
+            expiresAt: 0,
+            nonce: 0,
+            deadline: block.timestamp + 1 hours
+        });
+        
+        bytes memory sig = _signMetaTx(params, pk);
+        
+        vm.expectRevert(abi.encodeWithSelector(SealRegistry.AgentNotRegistered.selector, signer));
+        sealRegistry.submitSealWithSignature(params, sig);
+    }
+
+    /// @dev Test batch meta-transaction submission
+    function testMetaTx_Batch() public {
+        uint256 pk1 = 0xA11CE;
+        uint256 pk2 = 0xB0B;
+        
+        SealRegistry.MetaTxParams[] memory params = new SealRegistry.MetaTxParams[](2);
+        bytes[] memory sigs = new bytes[](2);
+        
+        params[0] = SealRegistry.MetaTxParams({
+            subject: human2,
+            sealType: CREATIVE,
+            quadrant: uint8(SealRegistry.Quadrant.H2H),
+            score: 80,
+            evidenceHash: EVIDENCE_HASH,
+            expiresAt: 0,
+            nonce: 0,
+            deadline: block.timestamp + 1 hours
+        });
+        sigs[0] = _signMetaTx(params[0], pk1);
+        
+        params[1] = SealRegistry.MetaTxParams({
+            subject: human1,
+            sealType: keccak256("PROFESSIONAL"),
+            quadrant: uint8(SealRegistry.Quadrant.H2H),
+            score: 95,
+            evidenceHash: keccak256("ev2"),
+            expiresAt: 0,
+            nonce: 0,
+            deadline: block.timestamp + 1 hours
+        });
+        sigs[1] = _signMetaTx(params[1], pk2);
+        
+        uint256[] memory sealIds = sealRegistry.batchSubmitSealsWithSignatures(params, sigs);
+        
+        assertEq(sealIds.length, 2);
+        assertEq(sealRegistry.getSeal(sealIds[0]).score, 80);
+        assertEq(sealRegistry.getSeal(sealIds[1]).score, 95);
+    }
+
+    /// @dev Test DOMAIN_SEPARATOR is accessible
+    function testMetaTx_DomainSeparator() public view {
+        bytes32 ds = sealRegistry.DOMAIN_SEPARATOR();
+        assertTrue(ds != bytes32(0));
+    }
+
+    // ============================================================
+    //          TIME-WEIGHTED SCORING TESTS
+    // ============================================================
+
+    /// @dev Test time-weighted score with recent vs old seals
+    function testTimeWeighted_RecentVsOld() public {
+        uint256 halfLife = 30 days;
+        
+        // Issue old seal (60 days ago worth of time)
+        vm.prank(human1);
+        sealRegistry.issueSealH2H(human2, CREATIVE, 40, EVIDENCE_HASH);
+        
+        // Warp 60 days
+        vm.warp(block.timestamp + 60 days);
+        
+        // Issue recent seal (now)
+        vm.prank(human1);
+        sealRegistry.issueSealH2H(human2, keccak256("PROFESSIONAL"), 100, keccak256("ev2"));
+        
+        // Time-weighted score should favor the recent seal (100) over the old one (40)
+        (uint256 weighted, uint256 count) = sealRegistry.timeWeightedScore(
+            human2, halfLife, false, SealRegistry.Quadrant.H2H
+        );
+        
+        assertEq(count, 2);
+        // Old seal: weight = 30d/(30d+60d) = 30/90 = 0.333, score contribution = 40*0.333 = 13.33
+        // New seal: weight = 30d/(30d+0d) = 30/30 = 1.0, score contribution = 100*1.0 = 100
+        // Weighted avg = (13.33 + 100) / (0.333 + 1.0) = 113.33 / 1.333 ≈ 85
+        assertTrue(weighted > 80 && weighted < 90, "Should favor recent seal");
+    }
+
+    /// @dev Test time-weighted score with all-same-age seals equals simple average
+    function testTimeWeighted_SameAge() public {
+        uint256 halfLife = 30 days;
+        
+        vm.startPrank(human1);
+        sealRegistry.issueSealH2H(human2, CREATIVE, 80, EVIDENCE_HASH);
+        sealRegistry.issueSealH2H(human2, keccak256("PROFESSIONAL"), 90, keccak256("ev2"));
+        sealRegistry.issueSealH2H(human2, keccak256("FRIENDLY"), 70, keccak256("ev3"));
+        vm.stopPrank();
+        
+        // All same timestamp → equal weights → simple average = (80+90+70)/3 = 80
+        (uint256 weighted, uint256 count) = sealRegistry.timeWeightedScore(
+            human2, halfLife, false, SealRegistry.Quadrant.H2H
+        );
+        
+        assertEq(count, 3);
+        assertEq(weighted, 80);
+    }
+
+    /// @dev Test time-weighted score excludes revoked seals
+    function testTimeWeighted_ExcludesRevoked() public {
+        vm.startPrank(human1);
+        uint256 seal1 = sealRegistry.issueSealH2H(human2, CREATIVE, 40, EVIDENCE_HASH);
+        sealRegistry.issueSealH2H(human2, keccak256("PROFESSIONAL"), 100, keccak256("ev2"));
+        sealRegistry.revokeSeal(seal1, "wrong");
+        vm.stopPrank();
+        
+        (uint256 weighted, uint256 count) = sealRegistry.timeWeightedScore(
+            human2, 30 days, false, SealRegistry.Quadrant.H2H
+        );
+        
+        assertEq(count, 1);
+        assertEq(weighted, 100); // only non-revoked seal
+    }
+
+    /// @dev Test time-weighted score excludes expired seals
+    function testTimeWeighted_ExcludesExpired() public {
+        uint48 soon = uint48(block.timestamp + 1 hours);
+        
+        vm.prank(agent1);
+        sealRegistry.issueSealA2H(human1, SKILLFUL, 50, EVIDENCE_HASH, soon);
+        
+        vm.prank(agent1);
+        sealRegistry.issueSealA2H(human1, RELIABLE, 100, keccak256("ev2"), 0);
+        
+        vm.warp(block.timestamp + 2 hours);
+        
+        (uint256 weighted, uint256 count) = sealRegistry.timeWeightedScore(
+            human1, 30 days, false, SealRegistry.Quadrant.A2H
+        );
+        
+        assertEq(count, 1);
+        assertEq(weighted, 100);
+    }
+
+    /// @dev Test time-weighted score with quadrant filter
+    function testTimeWeighted_QuadrantFilter() public {
+        vm.prank(human1);
+        sealRegistry.issueSealH2H(human2, CREATIVE, 80, EVIDENCE_HASH);
+        
+        vm.prank(human1);
+        sealRegistry.issueSealH2A(AGENT2_ID, FAIR, 60, keccak256("ev2"));
+        
+        // Filter H2H → should only see the 80 score seal
+        (uint256 weightedH2H, uint256 countH2H) = sealRegistry.timeWeightedScore(
+            human2, 30 days, true, SealRegistry.Quadrant.H2H
+        );
+        assertEq(countH2H, 1);
+        assertEq(weightedH2H, 80);
+        
+        // Filter A2H → should see nothing for human2
+        (uint256 weightedA2H, uint256 countA2H) = sealRegistry.timeWeightedScore(
+            human2, 30 days, true, SealRegistry.Quadrant.A2H
+        );
+        assertEq(countA2H, 0);
+        assertEq(weightedA2H, 0);
+    }
+
+    /// @dev Test time-weighted score with no seals
+    function testTimeWeighted_NoSeals() public {
+        address nobody = makeAddr("nobody");
+        (uint256 weighted, uint256 count) = sealRegistry.timeWeightedScore(
+            nobody, 30 days, false, SealRegistry.Quadrant.H2H
+        );
+        assertEq(weighted, 0);
+        assertEq(count, 0);
+    }
+
+    /// @dev Test time-weighted score with very short half-life (aggressive decay)
+    function testTimeWeighted_ShortHalfLife() public {
+        vm.prank(human1);
+        sealRegistry.issueSealH2H(human2, CREATIVE, 50, EVIDENCE_HASH);
+        
+        // Warp 365 days
+        vm.warp(block.timestamp + 365 days);
+        
+        // Issue new seal
+        vm.prank(human1);
+        sealRegistry.issueSealH2H(human2, keccak256("PROFESSIONAL"), 100, keccak256("ev2"));
+        
+        // With 1-day half-life, old seal is almost worthless
+        (uint256 weighted, uint256 count) = sealRegistry.timeWeightedScore(
+            human2, 1 days, false, SealRegistry.Quadrant.H2H
+        );
+        
+        assertEq(count, 2);
+        // Old seal weight: 1/(1+365) ≈ 0.0027, basically nothing
+        // New seal weight: 1/(1+0) = 1.0
+        // Result should be very close to 100
+        assertTrue(weighted >= 99, "Old seal should be nearly worthless with short half-life");
     }
 }

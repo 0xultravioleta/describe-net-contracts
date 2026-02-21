@@ -2,6 +2,8 @@
 pragma solidity ^0.8.24;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "./interfaces/IIdentityRegistry.sol";
 
 /**
@@ -10,8 +12,15 @@ import "./interfaces/IIdentityRegistry.sol";
  * @dev describe-net is a universal reputation protocol where humans and agents evaluate each other
  * It extends the ERC-8004 agent identity standard with categorical "seals" (like SKILLFUL, RELIABLE, FAIR, etc.)
  * The SealRegistry sits alongside the existing IdentityRegistry and ReputationRegistry contracts
+ *
+ * Features:
+ * - Four quadrant evaluation: H2H, H2A, A2H, A2A
+ * - Batch seal issuance (up to 50 per TX)
+ * - EIP-712 meta-transactions (off-chain signing, on-chain submission)
+ * - Delegation system (agents can authorize sub-agents to issue seals)
+ * - Composite scoring with time-weighted decay
  */
-contract SealRegistry is Ownable {
+contract SealRegistry is Ownable, EIP712 {
     /// @dev Quadrants define the direction of evaluation
     enum Quadrant {
         H2H, // Human to Human
@@ -44,11 +53,38 @@ contract SealRegistry is Ownable {
         bool revoked;
     }
 
+    /// @dev EIP-712 typehash for meta-transaction seal submission
+    bytes32 public constant SEAL_TYPEHASH = keccak256(
+        "Seal(address subject,bytes32 sealType,uint8 quadrant,uint8 score,bytes32 evidenceHash,uint48 expiresAt,uint256 nonce,uint256 deadline)"
+    );
+
+    /**
+     * @dev Structure representing a delegation of seal-issuing authority
+     * @param delegator The agent who granted the delegation
+     * @param expiresAt When the delegation expires (0 = never)
+     * @param revoked Whether the delegation has been revoked
+     * @param sealTypeCount Number of seal types authorized
+     */
+    struct Delegation {
+        address delegator;
+        uint48 expiresAt;
+        bool revoked;
+    }
+
     /// @dev Counter for seal IDs
     uint256 private _sealIdCounter;
 
     /// @dev Identity registry interface
     IIdentityRegistry public identityRegistry;
+
+    /// @dev Nonce per evaluator for EIP-712 meta-transactions (replay protection)
+    mapping(address => uint256) public nonces;
+
+    /// @dev Delegation: delegator => delegate => Delegation
+    mapping(address => mapping(address => Delegation)) private _delegations;
+
+    /// @dev Delegation seal type authorization: delegator => delegate => sealType => authorized
+    mapping(address => mapping(address => mapping(bytes32 => bool))) private _delegatedSealTypes;
 
     /// @dev Mapping from seal ID to Seal struct
     mapping(uint256 => Seal) private _seals;
@@ -96,6 +132,27 @@ contract SealRegistry is Ownable {
 
     event AgentDomainsUpdated(address indexed agent, bytes32[] sealTypes);
 
+    event DelegationGranted(
+        address indexed delegator,
+        address indexed delegate,
+        bytes32[] sealTypes,
+        uint48 expiresAt
+    );
+
+    event DelegationRevoked(address indexed delegator, address indexed delegate);
+
+    event SealIssuedByDelegate(
+        uint256 indexed sealId,
+        address indexed delegator,
+        address indexed delegate
+    );
+
+    event MetaTxSealSubmitted(
+        uint256 indexed sealId,
+        address indexed evaluator,
+        address indexed relayer
+    );
+
     /// @dev Custom errors
     
     /// @notice Thrown when attempting to use an unrecognized seal type
@@ -135,12 +192,30 @@ contract SealRegistry is Ownable {
     /// @notice Thrown when batch size is 0 or exceeds maximum (50)
     /// @param size The invalid batch size
     error BatchSizeInvalid(uint256 size);
+    
+    /// @notice Thrown when a delegation does not exist or has been revoked
+    error DelegationNotActive();
+    
+    /// @notice Thrown when a delegate tries to issue a seal type not in their delegation
+    error DelegateNotAuthorizedForSealType(address delegate, bytes32 sealType);
+    
+    /// @notice Thrown when an agent tries to delegate to themselves
+    error SelfDelegationNotAllowed();
+    
+    /// @notice Thrown when a meta-transaction signature is invalid
+    error InvalidSignature();
+    
+    /// @notice Thrown when a meta-transaction deadline has passed
+    error DeadlineExpired();
+    
+    /// @notice Thrown when a meta-transaction nonce doesn't match
+    error InvalidNonce();
 
     /**
      * @dev Constructor
      * @param _identityRegistry Address of the identity registry contract
      */
-    constructor(address _identityRegistry) Ownable(msg.sender) {
+    constructor(address _identityRegistry) Ownable(msg.sender) EIP712("SealRegistry", "2") {
         identityRegistry = IIdentityRegistry(_identityRegistry);
         _initializeSealTypes();
     }
@@ -267,50 +342,58 @@ contract SealRegistry is Ownable {
     }
 
     /**
+     * @dev Packed parameters for a single seal in a batch operation
+     */
+    struct BatchSealParams {
+        address subject;
+        bytes32 sealType;
+        Quadrant quadrant;
+        uint8 score;
+        bytes32 evidenceHash;
+        uint48 expiresAt;
+    }
+
+    /**
      * @notice Batch issue seals (any quadrant, same evaluator)
      * @dev Issues multiple seals in a single transaction. All seals are from msg.sender.
      *      Useful for end-of-task evaluations where multiple dimensions are assessed at once.
-     * @param subjects Array of subject addresses
-     * @param sealTypes Array of seal type hashes
-     * @param quadrants Array of quadrant values
-     * @param scores Array of scores (0-100)
-     * @param evidenceHashes Array of evidence hashes
-     * @param expiresAts Array of expiration timestamps
+     *      Agent identity is checked only once per batch (gas optimization).
+     * @param sealParams Array of packed seal parameters
      * @return sealIds Array of created seal IDs
      */
     function batchIssueSeal(
-        address[] calldata subjects,
-        bytes32[] calldata sealTypes,
-        Quadrant[] calldata quadrants,
-        uint8[] calldata scores,
-        bytes32[] calldata evidenceHashes,
-        uint48[] calldata expiresAts
+        BatchSealParams[] calldata sealParams
     ) external returns (uint256[] memory sealIds) {
-        uint256 len = subjects.length;
-        if (len != sealTypes.length || len != quadrants.length || 
-            len != scores.length || len != evidenceHashes.length || len != expiresAts.length) {
-            revert BatchLengthMismatch();
-        }
+        uint256 len = sealParams.length;
         if (len == 0 || len > 50) revert BatchSizeInvalid(len);
         
         sealIds = new uint256[](len);
         
+        // Cache agent check — only look up once if any seal requires agent auth
+        bool agentChecked = false;
+        bool isAgent = false;
+        
         for (uint256 i = 0; i < len; i++) {
-            if (!validSealTypes[sealTypes[i]]) revert InvalidSealType(sealTypes[i]);
-            if (scores[i] > 100) revert InvalidScore(scores[i]);
+            BatchSealParams calldata p = sealParams[i];
+            if (!validSealTypes[p.sealType]) revert InvalidSealType(p.sealType);
+            if (p.score > 100) revert InvalidScore(p.score);
             
             // For agent quadrants (A2H, A2A), verify evaluator is registered agent with domain
-            if (quadrants[i] == Quadrant.A2H || quadrants[i] == Quadrant.A2A) {
-                IIdentityRegistry.AgentInfo memory agentInfo = identityRegistry.resolveByAddress(msg.sender);
-                if (agentInfo.agentId == 0) revert AgentNotRegistered(msg.sender);
-                if (!agentSealDomains[msg.sender][sealTypes[i]]) {
-                    revert AgentNotAuthorizedForSealType(msg.sender, sealTypes[i]);
+            if (p.quadrant == Quadrant.A2H || p.quadrant == Quadrant.A2A) {
+                if (!agentChecked) {
+                    IIdentityRegistry.AgentInfo memory agentInfo = identityRegistry.resolveByAddress(msg.sender);
+                    isAgent = agentInfo.agentId != 0;
+                    agentChecked = true;
+                }
+                if (!isAgent) revert AgentNotRegistered(msg.sender);
+                if (!agentSealDomains[msg.sender][p.sealType]) {
+                    revert AgentNotAuthorizedForSealType(msg.sender, p.sealType);
                 }
             }
             
             sealIds[i] = _issueSeal(
-                subjects[i], msg.sender, sealTypes[i], quadrants[i],
-                evidenceHashes[i], scores[i], expiresAts[i]
+                p.subject, msg.sender, p.sealType, p.quadrant,
+                p.evidenceHash, p.score, p.expiresAt
             );
         }
     }
@@ -621,5 +704,309 @@ contract SealRegistry is Ownable {
         }
         
         return result;
+    }
+
+    // ============================================================
+    //                    DELEGATION SYSTEM
+    // ============================================================
+
+    /**
+     * @notice Grant seal-issuing authority to a delegate agent
+     * @dev Only registered agents can delegate. The delegate need not be a registered agent —
+     *      this enables temporary sub-agents (e.g., in KC swarms) to issue seals on behalf
+     *      of their parent agent's identity. The seal's evaluator is recorded as the delegate,
+     *      with the delegation relationship tracked via events.
+     * @param delegate Address of the agent being granted authority
+     * @param sealTypes Array of seal types the delegate can issue
+     * @param expiresAt When the delegation expires (0 = never)
+     */
+    function delegateSealAuthority(
+        address delegate,
+        bytes32[] calldata sealTypes,
+        uint48 expiresAt
+    ) external {
+        if (delegate == msg.sender) revert SelfDelegationNotAllowed();
+        
+        // Verify delegator is a registered agent
+        IIdentityRegistry.AgentInfo memory agentInfo = identityRegistry.resolveByAddress(msg.sender);
+        if (agentInfo.agentId == 0) revert AgentNotRegistered(msg.sender);
+        
+        // Verify all seal types are valid and delegator has them in their domains
+        for (uint256 i = 0; i < sealTypes.length; i++) {
+            if (!validSealTypes[sealTypes[i]]) revert InvalidSealType(sealTypes[i]);
+            if (!agentSealDomains[msg.sender][sealTypes[i]]) {
+                revert AgentNotAuthorizedForSealType(msg.sender, sealTypes[i]);
+            }
+            _delegatedSealTypes[msg.sender][delegate][sealTypes[i]] = true;
+        }
+        
+        _delegations[msg.sender][delegate] = Delegation({
+            delegator: msg.sender,
+            expiresAt: expiresAt,
+            revoked: false
+        });
+        
+        emit DelegationGranted(msg.sender, delegate, sealTypes, expiresAt);
+    }
+
+    /**
+     * @notice Revoke a previously granted delegation
+     * @dev Only the original delegator can revoke. Revocation is permanent for this delegation.
+     * @param delegate Address of the delegate to revoke
+     */
+    function revokeDelegation(address delegate) external {
+        Delegation storage del = _delegations[msg.sender][delegate];
+        if (del.delegator == address(0)) revert DelegationNotActive();
+        
+        del.revoked = true;
+        
+        emit DelegationRevoked(msg.sender, delegate);
+    }
+
+    /**
+     * @notice Issue a seal as a delegate on behalf of a delegator
+     * @dev The delegate must have an active, non-expired delegation from the delegator
+     *      that includes the specified seal type. The seal is issued with the delegate
+     *      as evaluator (transparent delegation chain via events).
+     * @param delegator Address of the agent who granted the delegation
+     * @param subject Address of the entity receiving the seal
+     * @param sealType Type of seal being issued
+     * @param quadrant Direction of evaluation
+     * @param score Score from 0-100
+     * @param evidenceHash Hash of evidence supporting the seal
+     * @param expiresAt Expiration timestamp for the seal (0 = never)
+     * @return sealId The unique identifier assigned to the new seal
+     */
+    function issueSealAsDelegate(
+        address delegator,
+        address subject,
+        bytes32 sealType,
+        Quadrant quadrant,
+        uint8 score,
+        bytes32 evidenceHash,
+        uint48 expiresAt
+    ) external returns (uint256 sealId) {
+        if (!validSealTypes[sealType]) revert InvalidSealType(sealType);
+        if (score > 100) revert InvalidScore(score);
+        
+        // Verify delegation is active
+        Delegation memory del = _delegations[delegator][msg.sender];
+        if (del.delegator == address(0) || del.revoked) revert DelegationNotActive();
+        if (del.expiresAt != 0 && block.timestamp > del.expiresAt) revert DelegationNotActive();
+        
+        // Verify delegate is authorized for this seal type
+        if (!_delegatedSealTypes[delegator][msg.sender][sealType]) {
+            revert DelegateNotAuthorizedForSealType(msg.sender, sealType);
+        }
+        
+        // Issue seal with delegate as evaluator (transparent chain)
+        sealId = _issueSeal(subject, msg.sender, sealType, quadrant, evidenceHash, score, expiresAt);
+        
+        emit SealIssuedByDelegate(sealId, delegator, msg.sender);
+    }
+
+    /**
+     * @notice Check if a delegation is currently active
+     * @param delegator Address of the delegator
+     * @param delegate Address of the delegate
+     * @return active True if delegation exists, is not revoked, and has not expired
+     */
+    function isDelegationActive(address delegator, address delegate) external view returns (bool active) {
+        Delegation memory del = _delegations[delegator][delegate];
+        if (del.delegator == address(0) || del.revoked) return false;
+        if (del.expiresAt != 0 && block.timestamp > del.expiresAt) return false;
+        return true;
+    }
+
+    /**
+     * @notice Check if a delegate is authorized for a specific seal type
+     * @param delegator Address of the delegator
+     * @param delegate Address of the delegate
+     * @param sealType Seal type to check
+     * @return True if delegate can issue this seal type on behalf of delegator
+     */
+    function isDelegateAuthorizedForType(
+        address delegator,
+        address delegate,
+        bytes32 sealType
+    ) external view returns (bool) {
+        return _delegatedSealTypes[delegator][delegate][sealType];
+    }
+
+    // ============================================================
+    //              EIP-712 META-TRANSACTION SEALS
+    // ============================================================
+
+    /**
+     * @dev Packed parameters for meta-transaction seal submission (avoids stack-too-deep)
+     */
+    struct MetaTxParams {
+        address subject;
+        bytes32 sealType;
+        uint8 quadrant;
+        uint8 score;
+        bytes32 evidenceHash;
+        uint48 expiresAt;
+        uint256 nonce;
+        uint256 deadline;
+    }
+
+    /**
+     * @notice Submit a seal signed off-chain by the evaluator (meta-transaction)
+     * @dev Enables gasless seal issuance for agents. The evaluator signs the seal data
+     *      off-chain using EIP-712, and any relayer can submit it on-chain.
+     *      This is critical for swarm operations where 8+ agents issue seals simultaneously.
+     *      The relayer pays gas; the evaluator's nonce is incremented to prevent replay.
+     * @param params Packed seal parameters
+     * @param signature EIP-712 signature from the evaluator
+     * @return sealId The unique identifier assigned to the new seal
+     */
+    function submitSealWithSignature(
+        MetaTxParams calldata params,
+        bytes calldata signature
+    ) external returns (uint256 sealId) {
+        if (block.timestamp > params.deadline) revert DeadlineExpired();
+        if (!validSealTypes[params.sealType]) revert InvalidSealType(params.sealType);
+        if (params.score > 100) revert InvalidScore(params.score);
+        if (params.quadrant > 3) revert InvalidSealType(params.sealType);
+        
+        // Recover evaluator from EIP-712 signature
+        address evaluator = _recoverMetaTxSigner(params, signature);
+        
+        // Verify nonce
+        if (nonces[evaluator] != params.nonce) revert InvalidNonce();
+        nonces[evaluator]++;
+        
+        // Validate agent permissions for agent quadrants
+        Quadrant q = Quadrant(params.quadrant);
+        _validateMetaTxAgent(evaluator, params.sealType, params.subject, q);
+        
+        sealId = _issueSeal(params.subject, evaluator, params.sealType, q, params.evidenceHash, params.score, params.expiresAt);
+        
+        emit MetaTxSealSubmitted(sealId, evaluator, msg.sender);
+    }
+
+    /**
+     * @dev Recover signer from EIP-712 meta-transaction signature
+     */
+    function _recoverMetaTxSigner(
+        MetaTxParams calldata params,
+        bytes calldata signature
+    ) private view returns (address) {
+        bytes32 structHash = keccak256(abi.encode(
+            SEAL_TYPEHASH,
+            params.subject,
+            params.sealType,
+            params.quadrant,
+            params.score,
+            params.evidenceHash,
+            params.expiresAt,
+            params.nonce,
+            params.deadline
+        ));
+        
+        return ECDSA.recover(_hashTypedDataV4(structHash), signature);
+    }
+
+    /**
+     * @dev Validate agent permissions for meta-transaction seals
+     */
+    function _validateMetaTxAgent(
+        address evaluator,
+        bytes32 sealType,
+        address subject,
+        Quadrant q
+    ) private view {
+        if (q == Quadrant.A2H || q == Quadrant.A2A) {
+            IIdentityRegistry.AgentInfo memory agentInfo = identityRegistry.resolveByAddress(evaluator);
+            if (agentInfo.agentId == 0) revert AgentNotRegistered(evaluator);
+            if (!agentSealDomains[evaluator][sealType]) {
+                revert AgentNotAuthorizedForSealType(evaluator, sealType);
+            }
+        }
+        if (q == Quadrant.A2A && evaluator == subject) revert SelfFeedbackNotAllowed();
+    }
+
+    /**
+     * @notice Batch submit seals with signatures (multi-evaluator meta-transactions)
+     * @dev Submit up to 20 signed seals in one transaction. Each seal can be from a different
+     *      evaluator. Designed for swarm completion events where multiple agents evaluate each other.
+     * @param params Array of packed seal parameters
+     * @param signatures Array of EIP-712 signatures (one per params entry)
+     * @return sealIds Array of created seal IDs
+     */
+    function batchSubmitSealsWithSignatures(
+        MetaTxParams[] calldata params,
+        bytes[] calldata signatures
+    ) external returns (uint256[] memory sealIds) {
+        uint256 len = params.length;
+        if (len != signatures.length) revert BatchLengthMismatch();
+        if (len == 0 || len > 20) revert BatchSizeInvalid(len);
+        
+        sealIds = new uint256[](len);
+        
+        for (uint256 i = 0; i < len; i++) {
+            sealIds[i] = this.submitSealWithSignature(params[i], signatures[i]);
+        }
+    }
+
+    /**
+     * @notice Get the EIP-712 domain separator
+     * @dev Useful for off-chain signature construction
+     * @return The domain separator hash
+     */
+    function DOMAIN_SEPARATOR() external view returns (bytes32) {
+        return _domainSeparatorV4();
+    }
+
+    // ============================================================
+    //              TIME-WEIGHTED SCORING
+    // ============================================================
+
+    /**
+     * @notice Calculate time-weighted composite score with exponential decay
+     * @dev More recent seals carry more weight. Uses a half-life model where a seal's
+     *      weight halves every `halfLifeSeconds`. This incentivizes consistent performance.
+     *      Weight formula: weight = 2^(-age/halfLife) approximated as (halfLife / (halfLife + age))
+     *      Using hyperbolic approximation to avoid floating point: w = halfLife / (halfLife + age)
+     * @param subject Address to calculate score for
+     * @param halfLifeSeconds Half-life in seconds (e.g., 30 days = 2592000)
+     * @param filterQuadrant If true, only count seals from the specified quadrant
+     * @param quadrant Quadrant to filter by (only used if filterQuadrant is true)
+     * @return weightedScore The time-weighted average score (0-100, scaled by 100 for precision)
+     * @return activeCount Number of active seals counted
+     */
+    function timeWeightedScore(
+        address subject,
+        uint256 halfLifeSeconds,
+        bool filterQuadrant,
+        Quadrant quadrant
+    ) external view returns (uint256 weightedScore, uint256 activeCount) {
+        require(halfLifeSeconds > 0, "Half-life must be positive");
+        
+        uint256[] storage sealIds = _subjectSeals[subject];
+        uint256 weightedSum = 0;
+        uint256 totalWeight = 0;
+        
+        for (uint256 i = 0; i < sealIds.length; i++) {
+            Seal memory seal = _seals[sealIds[i]];
+            
+            if (seal.revoked) continue;
+            if (seal.expiresAt != 0 && block.timestamp > seal.expiresAt) continue;
+            if (filterQuadrant && seal.quadrant != quadrant) continue;
+            
+            // Hyperbolic decay: weight = halfLife / (halfLife + age)
+            // Multiply by 1e18 for precision
+            uint256 age = block.timestamp - seal.issuedAt;
+            uint256 weight = (halfLifeSeconds * 1e18) / (halfLifeSeconds + age);
+            
+            weightedSum += uint256(seal.score) * weight;
+            totalWeight += weight;
+            activeCount++;
+        }
+        
+        if (totalWeight > 0) {
+            weightedScore = weightedSum / totalWeight;
+        }
     }
 }
