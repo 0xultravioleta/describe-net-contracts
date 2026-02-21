@@ -666,4 +666,381 @@ contract SealRegistryTest is Test {
         uint256[] memory skillfulSeals = sealRegistry.getSubjectSealsByType(human1, SKILLFUL);
         assertEq(skillfulSeals.length, 2);
     }
+
+    // ============================================================
+    // A2A (Agent-to-Agent) Tests
+    // ============================================================
+
+    /// @dev Test A2A seal issuance (happy path)
+    function testIssueSealA2A_HappyPath() public {
+        // Register agent2 with SKILLFUL domain
+        vm.prank(agent2);
+        bytes32[] memory sealTypes = new bytes32[](2);
+        sealTypes[0] = SKILLFUL;
+        sealTypes[1] = RELIABLE;
+        sealRegistry.registerAgentSealDomains(sealTypes);
+
+        // Agent2 evaluates Agent1
+        vm.prank(agent2);
+        uint256 sealId = sealRegistry.issueSealA2A(
+            AGENT1_ID,
+            SKILLFUL,
+            88,
+            EVIDENCE_HASH,
+            0
+        );
+
+        SealRegistry.Seal memory seal = sealRegistry.getSeal(sealId);
+        assertEq(seal.subject, agent1);
+        assertEq(seal.evaluator, agent2);
+        assertEq(seal.sealType, SKILLFUL);
+        assertEq(uint8(seal.quadrant), uint8(SealRegistry.Quadrant.A2A));
+        assertEq(seal.score, 88);
+        assertFalse(seal.revoked);
+    }
+
+    /// @dev Test A2A prevents self-evaluation
+    function testIssueSealA2A_SelfEvaluation() public {
+        vm.prank(agent1);
+        vm.expectRevert(SealRegistry.SelfFeedbackNotAllowed.selector);
+        sealRegistry.issueSealA2A(AGENT1_ID, SKILLFUL, 90, EVIDENCE_HASH, 0);
+    }
+
+    /// @dev Test A2A requires evaluator to be registered agent
+    function testIssueSealA2A_NonAgentEvaluator() public {
+        vm.prank(human1);
+        vm.expectRevert(abi.encodeWithSelector(SealRegistry.AgentNotRegistered.selector, human1));
+        sealRegistry.issueSealA2A(AGENT1_ID, SKILLFUL, 90, EVIDENCE_HASH, 0);
+    }
+
+    /// @dev Test A2A requires evaluator to have seal domain
+    function testIssueSealA2A_UnauthorizedDomain() public {
+        // Agent2 has no domains registered
+        vm.prank(agent2);
+        bytes32[] memory sealTypes = new bytes32[](1);
+        sealTypes[0] = RELIABLE;
+        sealRegistry.registerAgentSealDomains(sealTypes);
+
+        // Try to issue SKILLFUL (not in agent2's domains)
+        vm.prank(agent2);
+        vm.expectRevert(abi.encodeWithSelector(
+            SealRegistry.AgentNotAuthorizedForSealType.selector, agent2, SKILLFUL
+        ));
+        sealRegistry.issueSealA2A(AGENT1_ID, SKILLFUL, 90, EVIDENCE_HASH, 0);
+    }
+
+    /// @dev Test A2A with nonexistent subject agent
+    function testIssueSealA2A_NonexistentSubject() public {
+        vm.prank(agent1);
+        vm.expectRevert(abi.encodeWithSelector(SealRegistry.AgentNotRegistered.selector, address(0)));
+        sealRegistry.issueSealA2A(999, SKILLFUL, 90, EVIDENCE_HASH, 0);
+    }
+
+    /// @dev Test A2A with expiration
+    function testIssueSealA2A_WithExpiration() public {
+        // Register agent2
+        vm.prank(agent2);
+        bytes32[] memory sealTypes = new bytes32[](1);
+        sealTypes[0] = SKILLFUL;
+        sealRegistry.registerAgentSealDomains(sealTypes);
+
+        uint48 expiresAt = uint48(block.timestamp + 1 days);
+
+        vm.prank(agent2);
+        uint256 sealId = sealRegistry.issueSealA2A(AGENT1_ID, SKILLFUL, 75, EVIDENCE_HASH, expiresAt);
+
+        assertFalse(sealRegistry.isSealExpired(sealId));
+
+        vm.warp(block.timestamp + 2 days);
+        assertTrue(sealRegistry.isSealExpired(sealId));
+    }
+
+    /// @dev Test bidirectional A2A seals
+    function testIssueSealA2A_Bidirectional() public {
+        // Register both agents with SKILLFUL
+        vm.prank(agent2);
+        bytes32[] memory sealTypes = new bytes32[](1);
+        sealTypes[0] = SKILLFUL;
+        sealRegistry.registerAgentSealDomains(sealTypes);
+
+        // Agent1 evaluates Agent2
+        vm.prank(agent1);
+        uint256 seal1 = sealRegistry.issueSealA2A(AGENT2_ID, SKILLFUL, 85, EVIDENCE_HASH, 0);
+
+        // Agent2 evaluates Agent1
+        vm.prank(agent2);
+        uint256 seal2 = sealRegistry.issueSealA2A(AGENT1_ID, SKILLFUL, 90, EVIDENCE_HASH, 0);
+
+        // Both seals exist with correct direction
+        assertEq(sealRegistry.getSeal(seal1).subject, agent2);
+        assertEq(sealRegistry.getSeal(seal1).evaluator, agent1);
+        assertEq(sealRegistry.getSeal(seal2).subject, agent1);
+        assertEq(sealRegistry.getSeal(seal2).evaluator, agent2);
+    }
+
+    // ============================================================
+    // Batch Operations Tests
+    // ============================================================
+
+    /// @dev Test batch seal issuance (H2H)
+    function testBatchIssueSeal_H2H() public {
+        address[] memory subjects = new address[](3);
+        subjects[0] = human2;
+        subjects[1] = human2;
+        subjects[2] = agent1;
+
+        bytes32[] memory types = new bytes32[](3);
+        types[0] = CREATIVE;
+        types[1] = keccak256("PROFESSIONAL");
+        types[2] = keccak256("FRIENDLY");
+
+        SealRegistry.Quadrant[] memory quads = new SealRegistry.Quadrant[](3);
+        quads[0] = SealRegistry.Quadrant.H2H;
+        quads[1] = SealRegistry.Quadrant.H2H;
+        quads[2] = SealRegistry.Quadrant.H2H;
+
+        uint8[] memory scores = new uint8[](3);
+        scores[0] = 85;
+        scores[1] = 90;
+        scores[2] = 77;
+
+        bytes32[] memory evidences = new bytes32[](3);
+        evidences[0] = keccak256("ev1");
+        evidences[1] = keccak256("ev2");
+        evidences[2] = keccak256("ev3");
+
+        uint48[] memory expires = new uint48[](3);
+        expires[0] = 0;
+        expires[1] = 0;
+        expires[2] = 0;
+
+        vm.prank(human1);
+        uint256[] memory sealIds = sealRegistry.batchIssueSeal(
+            subjects, types, quads, scores, evidences, expires
+        );
+
+        assertEq(sealIds.length, 3);
+        assertEq(sealRegistry.getSeal(sealIds[0]).score, 85);
+        assertEq(sealRegistry.getSeal(sealIds[1]).score, 90);
+        assertEq(sealRegistry.getSeal(sealIds[2]).score, 77);
+    }
+
+    /// @dev Test batch with agent quadrants (A2H)
+    function testBatchIssueSeal_AgentQuadrant() public {
+        address[] memory subjects = new address[](2);
+        subjects[0] = human1;
+        subjects[1] = human2;
+
+        bytes32[] memory types = new bytes32[](2);
+        types[0] = SKILLFUL;
+        types[1] = RELIABLE;
+
+        SealRegistry.Quadrant[] memory quads = new SealRegistry.Quadrant[](2);
+        quads[0] = SealRegistry.Quadrant.A2H;
+        quads[1] = SealRegistry.Quadrant.A2H;
+
+        uint8[] memory scores = new uint8[](2);
+        scores[0] = 92;
+        scores[1] = 88;
+
+        bytes32[] memory evidences = new bytes32[](2);
+        evidences[0] = keccak256("task1");
+        evidences[1] = keccak256("task2");
+
+        uint48[] memory expires = new uint48[](2);
+        expires[0] = 0;
+        expires[1] = 0;
+
+        vm.prank(agent1);
+        uint256[] memory sealIds = sealRegistry.batchIssueSeal(
+            subjects, types, quads, scores, evidences, expires
+        );
+
+        assertEq(sealIds.length, 2);
+        assertEq(uint8(sealRegistry.getSeal(sealIds[0]).quadrant), uint8(SealRegistry.Quadrant.A2H));
+        assertEq(uint8(sealRegistry.getSeal(sealIds[1]).quadrant), uint8(SealRegistry.Quadrant.A2H));
+    }
+
+    /// @dev Test batch with mismatched array lengths
+    function testBatchIssueSeal_LengthMismatch() public {
+        address[] memory subjects = new address[](2);
+        subjects[0] = human1;
+        subjects[1] = human2;
+
+        bytes32[] memory types = new bytes32[](1); // Different length!
+        types[0] = CREATIVE;
+
+        SealRegistry.Quadrant[] memory quads = new SealRegistry.Quadrant[](2);
+        quads[0] = SealRegistry.Quadrant.H2H;
+        quads[1] = SealRegistry.Quadrant.H2H;
+
+        uint8[] memory scores = new uint8[](2);
+        scores[0] = 85;
+        scores[1] = 90;
+
+        bytes32[] memory evidences = new bytes32[](2);
+        evidences[0] = EVIDENCE_HASH;
+        evidences[1] = EVIDENCE_HASH;
+
+        uint48[] memory expires = new uint48[](2);
+        expires[0] = 0;
+        expires[1] = 0;
+
+        vm.prank(human1);
+        vm.expectRevert(SealRegistry.BatchLengthMismatch.selector);
+        sealRegistry.batchIssueSeal(subjects, types, quads, scores, evidences, expires);
+    }
+
+    /// @dev Test batch with empty arrays
+    function testBatchIssueSeal_EmptyBatch() public {
+        address[] memory subjects = new address[](0);
+        bytes32[] memory types = new bytes32[](0);
+        SealRegistry.Quadrant[] memory quads = new SealRegistry.Quadrant[](0);
+        uint8[] memory scores = new uint8[](0);
+        bytes32[] memory evidences = new bytes32[](0);
+        uint48[] memory expires = new uint48[](0);
+
+        vm.prank(human1);
+        vm.expectRevert(abi.encodeWithSelector(SealRegistry.BatchSizeInvalid.selector, 0));
+        sealRegistry.batchIssueSeal(subjects, types, quads, scores, evidences, expires);
+    }
+
+    // ============================================================
+    // Composite Score Tests
+    // ============================================================
+
+    /// @dev Test composite score with multiple seals
+    function testCompositeScore_Multiple() public {
+        // Issue 3 H2H seals to human2 from human1
+        vm.startPrank(human1);
+        sealRegistry.issueSealH2H(human2, CREATIVE, 80, EVIDENCE_HASH);
+        sealRegistry.issueSealH2H(human2, keccak256("PROFESSIONAL"), 90, EVIDENCE_HASH);
+        sealRegistry.issueSealH2H(human2, keccak256("FRIENDLY"), 70, EVIDENCE_HASH);
+        vm.stopPrank();
+
+        // Composite: (80 + 90 + 70) / 3 = 80
+        (uint256 avgScore, uint256 activeCount, uint256 totalCount) = 
+            sealRegistry.compositeScore(human2, false, SealRegistry.Quadrant.H2H);
+        assertEq(avgScore, 80);
+        assertEq(activeCount, 3);
+        assertEq(totalCount, 3);
+    }
+
+    /// @dev Test composite score excludes revoked seals
+    function testCompositeScore_ExcludesRevoked() public {
+        vm.startPrank(human1);
+        uint256 seal1 = sealRegistry.issueSealH2H(human2, CREATIVE, 80, EVIDENCE_HASH);
+        sealRegistry.issueSealH2H(human2, keccak256("PROFESSIONAL"), 100, EVIDENCE_HASH);
+        sealRegistry.revokeSeal(seal1, "revoked");
+        vm.stopPrank();
+
+        // Only seal2 counts: 100/1 = 100
+        (uint256 avgScore, uint256 activeCount, uint256 totalCount) = 
+            sealRegistry.compositeScore(human2, false, SealRegistry.Quadrant.H2H);
+        assertEq(avgScore, 100);
+        assertEq(activeCount, 1);
+        assertEq(totalCount, 2);
+    }
+
+    /// @dev Test composite score excludes expired seals
+    function testCompositeScore_ExcludesExpired() public {
+        uint48 soon = uint48(block.timestamp + 1 hours);
+
+        vm.prank(agent1);
+        sealRegistry.issueSealA2H(human1, SKILLFUL, 50, EVIDENCE_HASH, soon);
+
+        vm.prank(agent1);
+        sealRegistry.issueSealA2H(human1, RELIABLE, 90, EVIDENCE_HASH, 0); // never expires
+
+        // Before expiry: (50 + 90) / 2 = 70
+        (uint256 avgBefore, uint256 countBefore,) = 
+            sealRegistry.compositeScore(human1, false, SealRegistry.Quadrant.A2H);
+        assertEq(avgBefore, 70);
+        assertEq(countBefore, 2);
+
+        // After expiry: only 90/1 = 90
+        vm.warp(block.timestamp + 2 hours);
+        (uint256 avgAfter, uint256 countAfter,) = 
+            sealRegistry.compositeScore(human1, false, SealRegistry.Quadrant.A2H);
+        assertEq(avgAfter, 90);
+        assertEq(countAfter, 1);
+    }
+
+    /// @dev Test composite score with quadrant filter
+    function testCompositeScore_QuadrantFilter() public {
+        // Issue H2H seals
+        vm.prank(human1);
+        sealRegistry.issueSealH2H(human2, CREATIVE, 80, EVIDENCE_HASH);
+
+        // Issue H2A seal to agent1 (human2 is subject for H2H only)
+        // We'll check human2's score filtered by H2H
+        (uint256 avgH2H, uint256 countH2H,) = 
+            sealRegistry.compositeScore(human2, true, SealRegistry.Quadrant.H2H);
+        assertEq(avgH2H, 80);
+        assertEq(countH2H, 1);
+
+        // Filter by A2H should return 0
+        (uint256 avgA2H, uint256 countA2H,) = 
+            sealRegistry.compositeScore(human2, true, SealRegistry.Quadrant.A2H);
+        assertEq(avgA2H, 0);
+        assertEq(countA2H, 0);
+    }
+
+    /// @dev Test composite score for address with no seals
+    function testCompositeScore_NoSeals() public {
+        address nobody = makeAddr("nobody");
+        (uint256 avg, uint256 active, uint256 total) = 
+            sealRegistry.compositeScore(nobody, false, SealRegistry.Quadrant.H2H);
+        assertEq(avg, 0);
+        assertEq(active, 0);
+        assertEq(total, 0);
+    }
+
+    // ============================================================
+    // Reputation By Type Tests
+    // ============================================================
+
+    /// @dev Test reputation by type
+    function testReputationByType() public {
+        vm.startPrank(human1);
+        sealRegistry.issueSealH2H(human2, CREATIVE, 80, EVIDENCE_HASH);
+        sealRegistry.issueSealH2H(human2, CREATIVE, 90, keccak256("ev2"));
+        sealRegistry.issueSealH2H(human2, keccak256("PROFESSIONAL"), 70, keccak256("ev3"));
+        vm.stopPrank();
+
+        (uint256 avgCreative, uint256 countCreative) = sealRegistry.reputationByType(human2, CREATIVE);
+        assertEq(avgCreative, 85); // (80+90)/2
+        assertEq(countCreative, 2);
+
+        (uint256 avgPro, uint256 countPro) = sealRegistry.reputationByType(human2, keccak256("PROFESSIONAL"));
+        assertEq(avgPro, 70);
+        assertEq(countPro, 1);
+    }
+
+    // ============================================================
+    // Get Seals By Quadrant Tests
+    // ============================================================
+
+    /// @dev Test getting seals by quadrant
+    function testGetSubjectSealsByQuadrant() public {
+        // Issue seals in different quadrants for agent1
+        vm.prank(human1);
+        sealRegistry.issueSealH2A(AGENT1_ID, FAIR, 85, EVIDENCE_HASH);
+
+        vm.prank(human2);
+        sealRegistry.issueSealH2A(AGENT1_ID, FAIR, 90, keccak256("ev2"));
+
+        vm.prank(human1);
+        sealRegistry.issueSealH2H(agent1, CREATIVE, 70, keccak256("ev3"));
+
+        // agent1 should have 2 H2A seals and 1 H2H seal
+        uint256[] memory h2aSeals = sealRegistry.getSubjectSealsByQuadrant(agent1, SealRegistry.Quadrant.H2A);
+        assertEq(h2aSeals.length, 2);
+
+        uint256[] memory h2hSeals = sealRegistry.getSubjectSealsByQuadrant(agent1, SealRegistry.Quadrant.H2H);
+        assertEq(h2hSeals.length, 1);
+
+        uint256[] memory a2aSeals = sealRegistry.getSubjectSealsByQuadrant(agent1, SealRegistry.Quadrant.A2A);
+        assertEq(a2aSeals.length, 0);
+    }
 }

@@ -125,6 +125,16 @@ contract SealRegistry is Ownable {
     /// @param agent The agent address attempting the operation
     /// @param sealType The seal type the agent is not authorized for
     error AgentNotAuthorizedForSealType(address agent, bytes32 sealType);
+    
+    /// @notice Thrown when an entity attempts to evaluate itself
+    error SelfFeedbackNotAllowed();
+    
+    /// @notice Thrown when batch arrays have mismatched lengths
+    error BatchLengthMismatch();
+    
+    /// @notice Thrown when batch size is 0 or exceeds maximum (50)
+    /// @param size The invalid batch size
+    error BatchSizeInvalid(uint256 size);
 
     /**
      * @dev Constructor
@@ -214,6 +224,95 @@ contract SealRegistry is Ownable {
         IIdentityRegistry.AgentInfo memory agentInfo = identityRegistry.getAgent(agentId);
         
         sealId = _issueSeal(agentInfo.agentAddress, msg.sender, sealType, Quadrant.H2A, evidenceHash, score, 0);
+    }
+
+    /**
+     * @notice Agent issues seal to agent (A→A quadrant)
+     * @dev Both evaluator and subject must be registered agents. Evaluator must have the sealType in their domains.
+     *      This enables agent-to-agent reputation in multi-agent systems (e.g., KarmaCadabra swarms).
+     * @param subjectAgentId ID of the agent receiving the seal (must exist in IdentityRegistry)
+     * @param sealType Type of seal being issued (must be a valid seal type)
+     * @param score Score from 0-100 representing strength of the evaluation
+     * @param evidenceHash Hash of evidence supporting the seal (e.g., task completion hash, IPFS CID)
+     * @param expiresAt Expiration timestamp (0 for never expires)
+     * @return sealId The unique identifier assigned to the new seal
+     */
+    function issueSealA2A(
+        uint256 subjectAgentId,
+        bytes32 sealType,
+        uint8 score,
+        bytes32 evidenceHash,
+        uint48 expiresAt
+    ) external returns (uint256 sealId) {
+        if (!validSealTypes[sealType]) revert InvalidSealType(sealType);
+        if (score > 100) revert InvalidScore(score);
+        
+        // Check if the evaluator is a registered agent
+        IIdentityRegistry.AgentInfo memory agentInfo = identityRegistry.resolveByAddress(msg.sender);
+        if (agentInfo.agentId == 0) revert AgentNotRegistered(msg.sender);
+        
+        // Check if agent is authorized to issue this seal type
+        if (!agentSealDomains[msg.sender][sealType]) {
+            revert AgentNotAuthorizedForSealType(msg.sender, sealType);
+        }
+        
+        // Verify subject agent exists
+        if (!identityRegistry.agentExists(subjectAgentId)) revert AgentNotRegistered(address(0));
+        IIdentityRegistry.AgentInfo memory subjectInfo = identityRegistry.getAgent(subjectAgentId);
+        
+        // Prevent self-evaluation
+        if (msg.sender == subjectInfo.agentAddress) revert SelfFeedbackNotAllowed();
+        
+        sealId = _issueSeal(subjectInfo.agentAddress, msg.sender, sealType, Quadrant.A2A, evidenceHash, score, expiresAt);
+    }
+
+    /**
+     * @notice Batch issue seals (any quadrant, same evaluator)
+     * @dev Issues multiple seals in a single transaction. All seals are from msg.sender.
+     *      Useful for end-of-task evaluations where multiple dimensions are assessed at once.
+     * @param subjects Array of subject addresses
+     * @param sealTypes Array of seal type hashes
+     * @param quadrants Array of quadrant values
+     * @param scores Array of scores (0-100)
+     * @param evidenceHashes Array of evidence hashes
+     * @param expiresAts Array of expiration timestamps
+     * @return sealIds Array of created seal IDs
+     */
+    function batchIssueSeal(
+        address[] calldata subjects,
+        bytes32[] calldata sealTypes,
+        Quadrant[] calldata quadrants,
+        uint8[] calldata scores,
+        bytes32[] calldata evidenceHashes,
+        uint48[] calldata expiresAts
+    ) external returns (uint256[] memory sealIds) {
+        uint256 len = subjects.length;
+        if (len != sealTypes.length || len != quadrants.length || 
+            len != scores.length || len != evidenceHashes.length || len != expiresAts.length) {
+            revert BatchLengthMismatch();
+        }
+        if (len == 0 || len > 50) revert BatchSizeInvalid(len);
+        
+        sealIds = new uint256[](len);
+        
+        for (uint256 i = 0; i < len; i++) {
+            if (!validSealTypes[sealTypes[i]]) revert InvalidSealType(sealTypes[i]);
+            if (scores[i] > 100) revert InvalidScore(scores[i]);
+            
+            // For agent quadrants (A2H, A2A), verify evaluator is registered agent with domain
+            if (quadrants[i] == Quadrant.A2H || quadrants[i] == Quadrant.A2A) {
+                IIdentityRegistry.AgentInfo memory agentInfo = identityRegistry.resolveByAddress(msg.sender);
+                if (agentInfo.agentId == 0) revert AgentNotRegistered(msg.sender);
+                if (!agentSealDomains[msg.sender][sealTypes[i]]) {
+                    revert AgentNotAuthorizedForSealType(msg.sender, sealTypes[i]);
+                }
+            }
+            
+            sealIds[i] = _issueSeal(
+                subjects[i], msg.sender, sealTypes[i], quadrants[i],
+                evidenceHashes[i], scores[i], expiresAts[i]
+            );
+        }
     }
 
     /**
@@ -418,5 +517,109 @@ contract SealRegistry is Ownable {
         Seal memory seal = _seals[sealId];
         if (seal.evaluator == address(0)) revert SealNotFound(sealId);
         return seal.expiresAt != 0 && block.timestamp > seal.expiresAt;
+    }
+
+    /**
+     * @notice Calculate composite reputation score for a subject
+     * @dev Returns the average score across all active (non-revoked, non-expired) seals.
+     *      Optionally filter by quadrant. Returns 0 if no active seals found.
+     * @param subject Address to calculate score for
+     * @param filterQuadrant If true, only count seals from the specified quadrant
+     * @param quadrant Quadrant to filter by (only used if filterQuadrant is true)
+     * @return averageScore The weighted average score (0-100)
+     * @return activeCount Number of active seals counted
+     * @return totalCount Total number of seals (including expired/revoked)
+     */
+    function compositeScore(
+        address subject,
+        bool filterQuadrant,
+        Quadrant quadrant
+    ) external view returns (uint256 averageScore, uint256 activeCount, uint256 totalCount) {
+        uint256[] storage sealIds = _subjectSeals[subject];
+        totalCount = sealIds.length;
+        
+        uint256 scoreSum = 0;
+        
+        for (uint256 i = 0; i < sealIds.length; i++) {
+            Seal memory seal = _seals[sealIds[i]];
+            
+            // Skip revoked seals
+            if (seal.revoked) continue;
+            
+            // Skip expired seals
+            if (seal.expiresAt != 0 && block.timestamp > seal.expiresAt) continue;
+            
+            // Apply quadrant filter if requested
+            if (filterQuadrant && seal.quadrant != quadrant) continue;
+            
+            scoreSum += seal.score;
+            activeCount++;
+        }
+        
+        if (activeCount > 0) {
+            averageScore = scoreSum / activeCount;
+        }
+    }
+
+    /**
+     * @notice Get reputation breakdown by seal type for a subject
+     * @dev Returns the average score for a specific seal type across all active seals
+     * @param subject Address to check
+     * @param sealType Seal type to aggregate
+     * @return averageScore Average score for this seal type
+     * @return count Number of active seals of this type
+     */
+    function reputationByType(
+        address subject,
+        bytes32 sealType
+    ) external view returns (uint256 averageScore, uint256 count) {
+        uint256[] storage sealIds = _subjectSeals[subject];
+        uint256 scoreSum = 0;
+        
+        for (uint256 i = 0; i < sealIds.length; i++) {
+            Seal memory seal = _seals[sealIds[i]];
+            
+            if (seal.sealType != sealType) continue;
+            if (seal.revoked) continue;
+            if (seal.expiresAt != 0 && block.timestamp > seal.expiresAt) continue;
+            
+            scoreSum += seal.score;
+            count++;
+        }
+        
+        if (count > 0) {
+            averageScore = scoreSum / count;
+        }
+    }
+
+    /**
+     * @notice Get seals filtered by quadrant for a subject
+     * @param subject Address to get seals for
+     * @param quadrant Quadrant to filter by
+     * @return Array of seal IDs in the specified quadrant
+     */
+    function getSubjectSealsByQuadrant(
+        address subject,
+        Quadrant quadrant
+    ) external view returns (uint256[] memory) {
+        uint256[] storage subjectSealIds = _subjectSeals[subject];
+        uint256 count = 0;
+        
+        for (uint256 i = 0; i < subjectSealIds.length; i++) {
+            if (_seals[subjectSealIds[i]].quadrant == quadrant) {
+                count++;
+            }
+        }
+        
+        uint256[] memory result = new uint256[](count);
+        uint256 index = 0;
+        for (uint256 i = 0; i < subjectSealIds.length; i++) {
+            if (_seals[subjectSealIds[i]].quadrant == quadrant) {
+                result[index] = subjectSealIds[i];
+                index++;
+            }
+        }
+        
+        return result;
     }
 }
