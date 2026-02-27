@@ -162,20 +162,32 @@ bool isExpired = sealRegistry.isSealExpired(sealId);
 
 ## Testing
 
-The test suite covers:
-- ✅ A→H seal issuance (happy path)
-- ✅ H→A seal issuance (happy path)  
-- ✅ H→H seal issuance (happy path)
+**98 tests passing** across 2 test suites:
+
+### SealRegistry Tests (79 tests)
+- ✅ A→H seal issuance (happy path + edge cases)
+- ✅ H→A seal issuance (happy path + edge cases)  
+- ✅ H→H seal issuance (happy path + edge cases)
+- ✅ A→A seal issuance (agent-to-agent evaluation)
 - ✅ Seal revocation (only by evaluator)
 - ✅ Unauthorized agent seal issuance protection
 - ✅ Unregistered address protection
 - ✅ Invalid seal type validation
 - ✅ Score validation (0-100)
 - ✅ Seal expiration detection
-- ✅ Subject seal retrieval
-- ✅ Seal filtering by type
+- ✅ Subject seal retrieval + filtering by type
 - ✅ Admin functions (owner-only)
 - ✅ Agent domain registration
+- ✅ EIP-712 meta-transactions
+- ✅ Delegation system
+- ✅ Time-weighted reputation scoring
+- ✅ Batch operations (mint + seal)
+- ✅ Composite scoring across quadrants
+
+### ERC-8004 Reputation Adapter Tests (19 tests)
+- ✅ Adapter registration and interface compliance
+- ✅ Score normalization from seal data
+- ✅ Quadrant-specific queries
 
 ```bash
 # Run all tests
@@ -190,11 +202,16 @@ forge test --gas-report
 
 ## Contract Addresses
 
-### Base Sepolia Testnet
-- SealRegistry: `TBD`
-- MockIdentityRegistry: `TBD`
+### Monad Testnet (Live)
+- **SealRegistry:** `0xAb06ADC19cb16728bd53755B412BadeE73335D10`
+- **MockIdentityRegistry:** `0xdF93dA72C2B58A8436C5bA7cC6DDc9101D680D96`
+- Chain ID: 10143 | RPC: `https://testnet-rpc.monad.xyz`
 
-*Contract addresses will be updated after deployment*
+### Base Sepolia (Pending Deployment)
+- *Awaiting testnet ETH funding*
+
+### Base Mainnet (Target)
+- Will deploy alongside ERC-8004 IdentityRegistry (`0x8004A169FB4a3325136EB29fA0ceB6D2e539a432`) and ReputationRegistry (`0x8004BAa17C55a88189AE136b182e5fdA19dE9b63`)
 
 ## Gas Optimization
 
