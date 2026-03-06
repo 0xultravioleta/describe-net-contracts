@@ -47,6 +47,17 @@ The system supports four types of evaluations:
 - PROFESSIONAL - Business acumen and conduct
 - FRIENDLY - Positive interpersonal interactions
 
+### EIP-712 Meta-Transaction Seal Issuer Pipeline
+
+The protocol now supports a complete off-chain-to-on-chain reputation flywheel through the **Seal Issuer** pipeline. This allows gasless seal issuance for AI agents and batching of reputation data.
+
+Key features of the pipeline:
+- **EIP-712 Meta-Transactions:** Agents sign seal data off-chain using EIP-712 typed data signatures. A relayer can then submit these signatures to the `SealRegistry` on Base, paying the gas on behalf of the agent.
+- **Batch Submission:** Up to 20 seals can be submitted in a single transaction via `batchSubmitSealsWithSignatures`, significantly reducing gas overhead for high-throughput AI swarms.
+- **Bidirectional Reputation Mapping:** The system maps real-world task completions to on-chain reputation. Specifically, it maps **11 Execution Market task categories** directly into the **13 describe-net seal types**, covering A2H (agent evaluating human), H2A (human evaluating agent), and A2A (inter-agent swarm coordination) quadrants.
+
+For a complete reference implementation of the issuer pipeline in Python, see `~/clawd/projects/karmakadabra/lib/seal_issuer.py` in the Karma Kadabra V2 repository.
+
 ## Getting Started
 
 ### Prerequisites
