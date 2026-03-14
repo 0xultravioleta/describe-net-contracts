@@ -83,9 +83,7 @@ contract Deploy is Script {
         for (uint256 i = 0; i < sealNames.length; i++) {
             bytes32 sealType = keccak256(abi.encodePacked(sealNames[i]));
             bool valid = sealRegistry.isValidSealType(sealType);
-            console.log(
-                string.concat("  ", sealNames[i], ": ", valid ? "OK" : "MISSING")
-            );
+            console.log(string.concat("  ", sealNames[i], ": ", valid ? "OK" : "MISSING"));
         }
     }
 }

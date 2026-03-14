@@ -18,12 +18,8 @@ contract MockIdentityRegistry is IIdentityRegistry {
      * @param agentAddress Ethereum address associated with the agent
      */
     function addAgent(uint256 agentId, string calldata agentDomain, address agentAddress) external {
-        AgentInfo memory agent = AgentInfo({
-            agentId: agentId,
-            agentDomain: agentDomain,
-            agentAddress: agentAddress
-        });
-        
+        AgentInfo memory agent = AgentInfo({agentId: agentId, agentDomain: agentDomain, agentAddress: agentAddress});
+
         _agents[agentId] = agent;
         _agentsByAddress[agentAddress] = agent;
     }

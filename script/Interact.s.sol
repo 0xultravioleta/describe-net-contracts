@@ -89,12 +89,8 @@ contract Interact is Script {
         console.log("[4] Issued RELIABLE seal (score 92, 1yr expiry) -> seal ID:", sealId2);
 
         // --- Step 5: Human-to-Human seal (deployer to demo human) ---
-        uint256 sealId3 = sealRegistry.issueSealH2H(
-            DEMO_HUMAN,
-            keccak256("CREATIVE"),
-            78,
-            keccak256("demo-evidence-creative")
-        );
+        uint256 sealId3 =
+            sealRegistry.issueSealH2H(DEMO_HUMAN, keccak256("CREATIVE"), 78, keccak256("demo-evidence-creative"));
         console.log("[5] Issued H2H CREATIVE seal (score 78) -> seal ID:", sealId3);
 
         vm.stopBroadcast();
@@ -114,10 +110,7 @@ contract Interact is Script {
             console.log("    Revoked:", seal.revoked);
         }
 
-        uint256[] memory skillfulSeals = sealRegistry.getSubjectSealsByType(
-            DEMO_HUMAN,
-            keccak256("SKILLFUL")
-        );
+        uint256[] memory skillfulSeals = sealRegistry.getSubjectSealsByType(DEMO_HUMAN, keccak256("SKILLFUL"));
         console.log("");
         console.log("SKILLFUL seals for demo human:", skillfulSeals.length);
 
@@ -142,13 +135,7 @@ contract Interact is Script {
 
         vm.startBroadcast(pk);
 
-        uint256 sealId = sealRegistry.issueSealA2H(
-            target,
-            keccak256("SKILLFUL"),
-            score,
-            keccak256("cli-issued"),
-            0
-        );
+        uint256 sealId = sealRegistry.issueSealA2H(target, keccak256("SKILLFUL"), score, keccak256("cli-issued"), 0);
 
         vm.stopBroadcast();
 

@@ -9,7 +9,7 @@ import "@openzeppelin/contracts/utils/Strings.sol";
 /**
  * @title ERC8004ReputationAdapter
  * @dev Adapter contract that provides ERC-8004 compatibility for the describe-net SealRegistry
- * @dev This contract wraps an existing SealRegistry deployment and maps ERC-8004's giveFeedback() 
+ * @dev This contract wraps an existing SealRegistry deployment and maps ERC-8004's giveFeedback()
  *      to SealRegistry's issueSeal() system with proper tag-to-type/quadrant mapping
  */
 contract ERC8004ReputationAdapter is IERC8004ReputationAdapter {
@@ -36,7 +36,7 @@ contract ERC8004ReputationAdapter is IERC8004ReputationAdapter {
 
     /**
      * @dev Additional metadata stored for ERC-8004 compatibility
-     * @param originalSubmitter The original caller who submitted the feedback 
+     * @param originalSubmitter The original caller who submitted the feedback
      * @param valueDecimals Original value decimals from ERC-8004 call
      * @param endpoint Endpoint URL from ERC-8004 call
      * @param feedbackURI Feedback URI from ERC-8004 call
@@ -124,16 +124,13 @@ contract ERC8004ReputationAdapter is IERC8004ReputationAdapter {
     ) external returns (uint256 sealId) {
         // Validate inputs
         _validateFeedbackInputs(agentId, tag1, tag2);
-        
+
         // Convert and issue seal
         sealId = _issueSealFromFeedback(agentId, value, tag1, tag2, feedbackHash);
 
         // Store ERC-8004 metadata
         _erc8004Metadata[sealId] = ERC8004Metadata({
-            originalSubmitter: msg.sender,
-            valueDecimals: valueDecimals,
-            endpoint: endpoint,
-            feedbackURI: feedbackURI
+            originalSubmitter: msg.sender, valueDecimals: valueDecimals, endpoint: endpoint, feedbackURI: feedbackURI
         });
 
         // Emit ERC-8004 compatible event
@@ -146,17 +143,11 @@ contract ERC8004ReputationAdapter is IERC8004ReputationAdapter {
      * @param tag1 The seal type tag
      * @param tag2 The quadrant tag
      */
-    function _validateFeedbackInputs(
-        uint256 agentId,
-        string calldata tag1,
-        string calldata tag2
-    ) internal view {
+    function _validateFeedbackInputs(uint256 agentId, string calldata tag1, string calldata tag2) internal view {
         // Validate tags
         if (tag1ToSealType[tag1] == bytes32(0)) revert InvalidTag1(tag1);
-        if (!(keccak256(bytes(tag2)) == keccak256("H2H") ||
-              keccak256(bytes(tag2)) == keccak256("H2A") ||
-              keccak256(bytes(tag2)) == keccak256("A2H") ||
-              keccak256(bytes(tag2)) == keccak256("A2A"))) {
+        if (!(keccak256(bytes(tag2)) == keccak256("H2H") || keccak256(bytes(tag2)) == keccak256("H2A")
+                    || keccak256(bytes(tag2)) == keccak256("A2H") || keccak256(bytes(tag2)) == keccak256("A2A"))) {
             revert InvalidTag2(tag2);
         }
 
@@ -187,7 +178,7 @@ contract ERC8004ReputationAdapter is IERC8004ReputationAdapter {
     ) internal returns (uint256 sealId) {
         bytes32 sealType = tag1ToSealType[tag1];
         SealRegistry.Quadrant quadrant = tag2ToQuadrant[tag2];
-        
+
         // Convert value to score (clamp to 0-100)
         uint8 score;
         if (value < 0) {
@@ -228,7 +219,7 @@ contract ERC8004ReputationAdapter is IERC8004ReputationAdapter {
                 // If no agentId provided, this is invalid for A2H
                 revert("agentId required for A2H");
             }
-            
+
             // The adapter cannot directly call issueSealA2H because it's not a registered agent
             // We need to use a different approach or modify the design
             // For now, let's revert with a clear message
@@ -256,14 +247,14 @@ contract ERC8004ReputationAdapter is IERC8004ReputationAdapter {
     function sealToFeedback(uint256 sealId) public view returns (ERC8004Feedback memory feedback) {
         // Get seal data from SealRegistry
         SealRegistry.Seal memory seal = sealRegistry.getSeal(sealId);
-        
+
         // Get ERC-8004 metadata
         ERC8004Metadata memory metadata = _erc8004Metadata[sealId];
-        
+
         // Find agent ID for the subject
         IIdentityRegistry.AgentInfo memory agentInfo = identityRegistry.resolveByAddress(seal.subject);
         uint256 agentId = agentInfo.agentId;
-        
+
         // If subject is not a registered agent, try to infer from context
         if (agentId == 0) {
             // This could be an H2H seal where subject is not an agent
@@ -304,20 +295,14 @@ contract ERC8004ReputationAdapter is IERC8004ReputationAdapter {
         string calldata tag1,
         string calldata tag2,
         bytes32 feedbackHash
-    ) public view returns (
-        address subject,
-        bytes32 sealType,
-        uint8 quadrant,
-        uint8 score,
-        bytes32 evidenceHash
-    ) {
+    ) public view returns (address subject, bytes32 sealType, uint8 quadrant, uint8 score, bytes32 evidenceHash) {
         // Map tag1 to sealType
         sealType = tag1ToSealType[tag1];
-        
+
         // Map tag2 to quadrant
         SealRegistry.Quadrant quadrantEnum = tag2ToQuadrant[tag2];
         quadrant = uint8(quadrantEnum);
-        
+
         // Convert value to score (clamp to 0-100)
         if (value < 0) {
             score = 0;
@@ -326,7 +311,7 @@ contract ERC8004ReputationAdapter is IERC8004ReputationAdapter {
         } else {
             score = uint8(uint128(value));
         }
-        
+
         // Get subject address
         if (agentId > 0) {
             IIdentityRegistry.AgentInfo memory agentInfo = identityRegistry.getAgent(agentId);
@@ -336,7 +321,7 @@ contract ERC8004ReputationAdapter is IERC8004ReputationAdapter {
             // For now, we'll leave it as address(0) and let the caller handle it
             subject = address(0);
         }
-        
+
         // Map feedbackHash to evidenceHash
         evidenceHash = feedbackHash;
     }
@@ -356,11 +341,7 @@ contract ERC8004ReputationAdapter is IERC8004ReputationAdapter {
      * @return True if valid, false otherwise
      */
     function isValidTag2(string calldata tag2) external pure returns (bool) {
-        return (
-            keccak256(bytes(tag2)) == keccak256("H2H") ||
-            keccak256(bytes(tag2)) == keccak256("H2A") ||
-            keccak256(bytes(tag2)) == keccak256("A2H") ||
-            keccak256(bytes(tag2)) == keccak256("A2A")
-        );
+        return (keccak256(bytes(tag2)) == keccak256("H2H") || keccak256(bytes(tag2)) == keccak256("H2A")
+                || keccak256(bytes(tag2)) == keccak256("A2H") || keccak256(bytes(tag2)) == keccak256("A2A"));
     }
 }

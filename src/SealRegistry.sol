@@ -24,9 +24,9 @@ contract SealRegistry is Ownable, EIP712 {
     /// @dev Quadrants define the direction of evaluation
     enum Quadrant {
         H2H, // Human to Human
-        H2A, // Human to Agent  
+        H2A, // Human to Agent
         A2H, // Agent to Human
-        A2A  // Agent to Agent
+        A2A // Agent to Agent
     }
 
     /**
@@ -132,82 +132,69 @@ contract SealRegistry is Ownable, EIP712 {
 
     event AgentDomainsUpdated(address indexed agent, bytes32[] sealTypes);
 
-    event DelegationGranted(
-        address indexed delegator,
-        address indexed delegate,
-        bytes32[] sealTypes,
-        uint48 expiresAt
-    );
+    event DelegationGranted(address indexed delegator, address indexed delegate, bytes32[] sealTypes, uint48 expiresAt);
 
     event DelegationRevoked(address indexed delegator, address indexed delegate);
 
-    event SealIssuedByDelegate(
-        uint256 indexed sealId,
-        address indexed delegator,
-        address indexed delegate
-    );
+    event SealIssuedByDelegate(uint256 indexed sealId, address indexed delegator, address indexed delegate);
 
-    event MetaTxSealSubmitted(
-        uint256 indexed sealId,
-        address indexed evaluator,
-        address indexed relayer
-    );
+    event MetaTxSealSubmitted(uint256 indexed sealId, address indexed evaluator, address indexed relayer);
 
     /// @dev Custom errors
-    
+
     /// @notice Thrown when attempting to use an unrecognized seal type
     /// @param sealType The invalid seal type hash that was provided
     error InvalidSealType(bytes32 sealType);
-    
+
     /// @notice Thrown when a score exceeds the maximum allowed value of 100
     /// @param score The invalid score that was provided
     error InvalidScore(uint8 score);
-    
+
     /// @notice Thrown when a non-evaluator attempts to modify a seal they didn't issue
     error UnauthorizedEvaluator();
-    
+
     /// @notice Thrown when attempting to access a seal that doesn't exist
     /// @param sealId The seal ID that was not found
     error SealNotFound(uint256 sealId);
-    
+
     /// @notice Thrown when attempting to revoke a seal that is already revoked
     /// @param sealId The seal ID that was already revoked
     error SealAlreadyRevoked(uint256 sealId);
-    
+
     /// @notice Thrown when a non-registered agent attempts agent-only operations
     /// @param agent The address that is not registered as an agent
     error AgentNotRegistered(address agent);
-    
+
     /// @notice Thrown when an agent attempts to issue a seal type outside their registered domains
     /// @param agent The agent address attempting the operation
     /// @param sealType The seal type the agent is not authorized for
     error AgentNotAuthorizedForSealType(address agent, bytes32 sealType);
-    
+
     /// @notice Thrown when an entity attempts to evaluate itself
     error SelfFeedbackNotAllowed();
-    
+
     /// @notice Thrown when batch arrays have mismatched lengths
     error BatchLengthMismatch();
-    
+
     /// @notice Thrown when batch size is 0 or exceeds maximum (50)
     /// @param size The invalid batch size
     error BatchSizeInvalid(uint256 size);
-    
+
     /// @notice Thrown when a delegation does not exist or has been revoked
     error DelegationNotActive();
-    
+
     /// @notice Thrown when a delegate tries to issue a seal type not in their delegation
     error DelegateNotAuthorizedForSealType(address delegate, bytes32 sealType);
-    
+
     /// @notice Thrown when an agent tries to delegate to themselves
     error SelfDelegationNotAllowed();
-    
+
     /// @notice Thrown when a meta-transaction signature is invalid
     error InvalidSignature();
-    
+
     /// @notice Thrown when a meta-transaction deadline has passed
     error DeadlineExpired();
-    
+
     /// @notice Thrown when a meta-transaction nonce doesn't match
     error InvalidNonce();
 
@@ -231,13 +218,13 @@ contract SealRegistry is Ownable, EIP712 {
         validSealTypes[ENGAGED] = true;
         validSealTypes[HELPFUL] = true;
         validSealTypes[CURIOUS] = true;
-        
+
         // H→A seals
         validSealTypes[FAIR] = true;
         validSealTypes[ACCURATE] = true;
         validSealTypes[RESPONSIVE] = true;
         validSealTypes[ETHICAL] = true;
-        
+
         // H→H seals
         validSealTypes[CREATIVE] = true;
         validSealTypes[PROFESSIONAL] = true;
@@ -254,25 +241,22 @@ contract SealRegistry is Ownable, EIP712 {
      * @param expiresAt Expiration timestamp (0 for never expires). Seal expires when block.timestamp > expiresAt
      * @return sealId The unique identifier assigned to the new seal
      */
-    function issueSealA2H(
-        address subject,
-        bytes32 sealType,
-        uint8 score,
-        bytes32 evidenceHash,
-        uint48 expiresAt
-    ) external returns (uint256 sealId) {
+    function issueSealA2H(address subject, bytes32 sealType, uint8 score, bytes32 evidenceHash, uint48 expiresAt)
+        external
+        returns (uint256 sealId)
+    {
         if (!validSealTypes[sealType]) revert InvalidSealType(sealType);
         if (score > 100) revert InvalidScore(score);
-        
+
         // Check if the evaluator is a registered agent
         IIdentityRegistry.AgentInfo memory agentInfo = identityRegistry.resolveByAddress(msg.sender);
         if (agentInfo.agentId == 0) revert AgentNotRegistered(msg.sender);
-        
+
         // Check if agent is authorized to issue this seal type
         if (!agentSealDomains[msg.sender][sealType]) {
             revert AgentNotAuthorizedForSealType(msg.sender, sealType);
         }
-        
+
         sealId = _issueSeal(subject, msg.sender, sealType, Quadrant.A2H, evidenceHash, score, expiresAt);
     }
 
@@ -285,19 +269,17 @@ contract SealRegistry is Ownable, EIP712 {
      * @param evidenceHash Hash of evidence supporting the seal (e.g., IPFS CID)
      * @return sealId The unique identifier assigned to the new seal
      */
-    function issueSealH2A(
-        uint256 agentId,
-        bytes32 sealType,
-        uint8 score,
-        bytes32 evidenceHash
-    ) external returns (uint256 sealId) {
+    function issueSealH2A(uint256 agentId, bytes32 sealType, uint8 score, bytes32 evidenceHash)
+        external
+        returns (uint256 sealId)
+    {
         if (!validSealTypes[sealType]) revert InvalidSealType(sealType);
         if (score > 100) revert InvalidScore(score);
-        
+
         // Verify agent exists and get their address
         if (!identityRegistry.agentExists(agentId)) revert AgentNotRegistered(address(0));
         IIdentityRegistry.AgentInfo memory agentInfo = identityRegistry.getAgent(agentId);
-        
+
         sealId = _issueSeal(agentInfo.agentAddress, msg.sender, sealType, Quadrant.H2A, evidenceHash, score, 0);
     }
 
@@ -312,33 +294,31 @@ contract SealRegistry is Ownable, EIP712 {
      * @param expiresAt Expiration timestamp (0 for never expires)
      * @return sealId The unique identifier assigned to the new seal
      */
-    function issueSealA2A(
-        uint256 subjectAgentId,
-        bytes32 sealType,
-        uint8 score,
-        bytes32 evidenceHash,
-        uint48 expiresAt
-    ) external returns (uint256 sealId) {
+    function issueSealA2A(uint256 subjectAgentId, bytes32 sealType, uint8 score, bytes32 evidenceHash, uint48 expiresAt)
+        external
+        returns (uint256 sealId)
+    {
         if (!validSealTypes[sealType]) revert InvalidSealType(sealType);
         if (score > 100) revert InvalidScore(score);
-        
+
         // Check if the evaluator is a registered agent
         IIdentityRegistry.AgentInfo memory agentInfo = identityRegistry.resolveByAddress(msg.sender);
         if (agentInfo.agentId == 0) revert AgentNotRegistered(msg.sender);
-        
+
         // Check if agent is authorized to issue this seal type
         if (!agentSealDomains[msg.sender][sealType]) {
             revert AgentNotAuthorizedForSealType(msg.sender, sealType);
         }
-        
+
         // Verify subject agent exists
         if (!identityRegistry.agentExists(subjectAgentId)) revert AgentNotRegistered(address(0));
         IIdentityRegistry.AgentInfo memory subjectInfo = identityRegistry.getAgent(subjectAgentId);
-        
+
         // Prevent self-evaluation
         if (msg.sender == subjectInfo.agentAddress) revert SelfFeedbackNotAllowed();
-        
-        sealId = _issueSeal(subjectInfo.agentAddress, msg.sender, sealType, Quadrant.A2A, evidenceHash, score, expiresAt);
+
+        sealId =
+            _issueSeal(subjectInfo.agentAddress, msg.sender, sealType, Quadrant.A2A, evidenceHash, score, expiresAt);
     }
 
     /**
@@ -361,23 +341,21 @@ contract SealRegistry is Ownable, EIP712 {
      * @param sealParams Array of packed seal parameters
      * @return sealIds Array of created seal IDs
      */
-    function batchIssueSeal(
-        BatchSealParams[] calldata sealParams
-    ) external returns (uint256[] memory sealIds) {
+    function batchIssueSeal(BatchSealParams[] calldata sealParams) external returns (uint256[] memory sealIds) {
         uint256 len = sealParams.length;
         if (len == 0 || len > 50) revert BatchSizeInvalid(len);
-        
+
         sealIds = new uint256[](len);
-        
+
         // Cache agent check — only look up once if any seal requires agent auth
         bool agentChecked = false;
         bool isAgent = false;
-        
+
         for (uint256 i = 0; i < len; i++) {
             BatchSealParams calldata p = sealParams[i];
             if (!validSealTypes[p.sealType]) revert InvalidSealType(p.sealType);
             if (p.score > 100) revert InvalidScore(p.score);
-            
+
             // For agent quadrants (A2H, A2A), verify evaluator is registered agent with domain
             if (p.quadrant == Quadrant.A2H || p.quadrant == Quadrant.A2A) {
                 if (!agentChecked) {
@@ -390,11 +368,8 @@ contract SealRegistry is Ownable, EIP712 {
                     revert AgentNotAuthorizedForSealType(msg.sender, p.sealType);
                 }
             }
-            
-            sealIds[i] = _issueSeal(
-                p.subject, msg.sender, p.sealType, p.quadrant,
-                p.evidenceHash, p.score, p.expiresAt
-            );
+
+            sealIds[i] = _issueSeal(p.subject, msg.sender, p.sealType, p.quadrant, p.evidenceHash, p.score, p.expiresAt);
         }
     }
 
@@ -407,15 +382,13 @@ contract SealRegistry is Ownable, EIP712 {
      * @param evidenceHash Hash of evidence supporting the seal (e.g., IPFS CID)
      * @return sealId The unique identifier assigned to the new seal
      */
-    function issueSealH2H(
-        address subject,
-        bytes32 sealType,
-        uint8 score,
-        bytes32 evidenceHash
-    ) external returns (uint256 sealId) {
+    function issueSealH2H(address subject, bytes32 sealType, uint8 score, bytes32 evidenceHash)
+        external
+        returns (uint256 sealId)
+    {
         if (!validSealTypes[sealType]) revert InvalidSealType(sealType);
         if (score > 100) revert InvalidScore(score);
-        
+
         sealId = _issueSeal(subject, msg.sender, sealType, Quadrant.H2H, evidenceHash, score, 0);
     }
 
@@ -440,7 +413,7 @@ contract SealRegistry is Ownable, EIP712 {
         uint48 expiresAt
     ) private returns (uint256 sealId) {
         sealId = ++_sealIdCounter;
-        
+
         _seals[sealId] = Seal({
             sealType: sealType,
             subject: subject,
@@ -471,9 +444,9 @@ contract SealRegistry is Ownable, EIP712 {
         if (seal.evaluator == address(0)) revert SealNotFound(sealId);
         if (seal.evaluator != msg.sender) revert UnauthorizedEvaluator();
         if (seal.revoked) revert SealAlreadyRevoked(sealId);
-        
+
         seal.revoked = true;
-        
+
         emit SealRevoked(sealId, msg.sender, reason);
     }
 
@@ -485,13 +458,13 @@ contract SealRegistry is Ownable, EIP712 {
         // Verify caller is a registered agent
         IIdentityRegistry.AgentInfo memory agentInfo = identityRegistry.resolveByAddress(msg.sender);
         if (agentInfo.agentId == 0) revert AgentNotRegistered(msg.sender);
-        
+
         // Clear existing domains first
-        for (uint i = 0; i < sealTypes.length; i++) {
+        for (uint256 i = 0; i < sealTypes.length; i++) {
             if (!validSealTypes[sealTypes[i]]) revert InvalidSealType(sealTypes[i]);
             agentSealDomains[msg.sender][sealTypes[i]] = true;
         }
-        
+
         emit AgentDomainsUpdated(msg.sender, sealTypes);
     }
 
@@ -543,14 +516,14 @@ contract SealRegistry is Ownable, EIP712 {
     function getSubjectSealsByType(address subject, bytes32 sealType) external view returns (uint256[] memory) {
         uint256[] storage subjectSealIds = _subjectSeals[subject];
         uint256 count = 0;
-        
+
         // First pass: count matching seals
         for (uint256 i = 0; i < subjectSealIds.length; i++) {
             if (_seals[subjectSealIds[i]].sealType == sealType) {
                 count++;
             }
         }
-        
+
         // Second pass: populate result array
         uint256[] memory result = new uint256[](count);
         uint256 index = 0;
@@ -560,7 +533,7 @@ contract SealRegistry is Ownable, EIP712 {
                 index++;
             }
         }
-        
+
         return result;
     }
 
@@ -613,32 +586,32 @@ contract SealRegistry is Ownable, EIP712 {
      * @return activeCount Number of active seals counted
      * @return totalCount Total number of seals (including expired/revoked)
      */
-    function compositeScore(
-        address subject,
-        bool filterQuadrant,
-        Quadrant quadrant
-    ) external view returns (uint256 averageScore, uint256 activeCount, uint256 totalCount) {
+    function compositeScore(address subject, bool filterQuadrant, Quadrant quadrant)
+        external
+        view
+        returns (uint256 averageScore, uint256 activeCount, uint256 totalCount)
+    {
         uint256[] storage sealIds = _subjectSeals[subject];
         totalCount = sealIds.length;
-        
+
         uint256 scoreSum = 0;
-        
+
         for (uint256 i = 0; i < sealIds.length; i++) {
             Seal memory seal = _seals[sealIds[i]];
-            
+
             // Skip revoked seals
             if (seal.revoked) continue;
-            
+
             // Skip expired seals
             if (seal.expiresAt != 0 && block.timestamp > seal.expiresAt) continue;
-            
+
             // Apply quadrant filter if requested
             if (filterQuadrant && seal.quadrant != quadrant) continue;
-            
+
             scoreSum += seal.score;
             activeCount++;
         }
-        
+
         if (activeCount > 0) {
             averageScore = scoreSum / activeCount;
         }
@@ -652,24 +625,25 @@ contract SealRegistry is Ownable, EIP712 {
      * @return averageScore Average score for this seal type
      * @return count Number of active seals of this type
      */
-    function reputationByType(
-        address subject,
-        bytes32 sealType
-    ) external view returns (uint256 averageScore, uint256 count) {
+    function reputationByType(address subject, bytes32 sealType)
+        external
+        view
+        returns (uint256 averageScore, uint256 count)
+    {
         uint256[] storage sealIds = _subjectSeals[subject];
         uint256 scoreSum = 0;
-        
+
         for (uint256 i = 0; i < sealIds.length; i++) {
             Seal memory seal = _seals[sealIds[i]];
-            
+
             if (seal.sealType != sealType) continue;
             if (seal.revoked) continue;
             if (seal.expiresAt != 0 && block.timestamp > seal.expiresAt) continue;
-            
+
             scoreSum += seal.score;
             count++;
         }
-        
+
         if (count > 0) {
             averageScore = scoreSum / count;
         }
@@ -681,19 +655,16 @@ contract SealRegistry is Ownable, EIP712 {
      * @param quadrant Quadrant to filter by
      * @return Array of seal IDs in the specified quadrant
      */
-    function getSubjectSealsByQuadrant(
-        address subject,
-        Quadrant quadrant
-    ) external view returns (uint256[] memory) {
+    function getSubjectSealsByQuadrant(address subject, Quadrant quadrant) external view returns (uint256[] memory) {
         uint256[] storage subjectSealIds = _subjectSeals[subject];
         uint256 count = 0;
-        
+
         for (uint256 i = 0; i < subjectSealIds.length; i++) {
             if (_seals[subjectSealIds[i]].quadrant == quadrant) {
                 count++;
             }
         }
-        
+
         uint256[] memory result = new uint256[](count);
         uint256 index = 0;
         for (uint256 i = 0; i < subjectSealIds.length; i++) {
@@ -702,7 +673,7 @@ contract SealRegistry is Ownable, EIP712 {
                 index++;
             }
         }
-        
+
         return result;
     }
 
@@ -720,17 +691,13 @@ contract SealRegistry is Ownable, EIP712 {
      * @param sealTypes Array of seal types the delegate can issue
      * @param expiresAt When the delegation expires (0 = never)
      */
-    function delegateSealAuthority(
-        address delegate,
-        bytes32[] calldata sealTypes,
-        uint48 expiresAt
-    ) external {
+    function delegateSealAuthority(address delegate, bytes32[] calldata sealTypes, uint48 expiresAt) external {
         if (delegate == msg.sender) revert SelfDelegationNotAllowed();
-        
+
         // Verify delegator is a registered agent
         IIdentityRegistry.AgentInfo memory agentInfo = identityRegistry.resolveByAddress(msg.sender);
         if (agentInfo.agentId == 0) revert AgentNotRegistered(msg.sender);
-        
+
         // Verify all seal types are valid and delegator has them in their domains
         for (uint256 i = 0; i < sealTypes.length; i++) {
             if (!validSealTypes[sealTypes[i]]) revert InvalidSealType(sealTypes[i]);
@@ -739,13 +706,9 @@ contract SealRegistry is Ownable, EIP712 {
             }
             _delegatedSealTypes[msg.sender][delegate][sealTypes[i]] = true;
         }
-        
-        _delegations[msg.sender][delegate] = Delegation({
-            delegator: msg.sender,
-            expiresAt: expiresAt,
-            revoked: false
-        });
-        
+
+        _delegations[msg.sender][delegate] = Delegation({delegator: msg.sender, expiresAt: expiresAt, revoked: false});
+
         emit DelegationGranted(msg.sender, delegate, sealTypes, expiresAt);
     }
 
@@ -757,9 +720,9 @@ contract SealRegistry is Ownable, EIP712 {
     function revokeDelegation(address delegate) external {
         Delegation storage del = _delegations[msg.sender][delegate];
         if (del.delegator == address(0)) revert DelegationNotActive();
-        
+
         del.revoked = true;
-        
+
         emit DelegationRevoked(msg.sender, delegate);
     }
 
@@ -788,20 +751,20 @@ contract SealRegistry is Ownable, EIP712 {
     ) external returns (uint256 sealId) {
         if (!validSealTypes[sealType]) revert InvalidSealType(sealType);
         if (score > 100) revert InvalidScore(score);
-        
+
         // Verify delegation is active
         Delegation memory del = _delegations[delegator][msg.sender];
         if (del.delegator == address(0) || del.revoked) revert DelegationNotActive();
         if (del.expiresAt != 0 && block.timestamp > del.expiresAt) revert DelegationNotActive();
-        
+
         // Verify delegate is authorized for this seal type
         if (!_delegatedSealTypes[delegator][msg.sender][sealType]) {
             revert DelegateNotAuthorizedForSealType(msg.sender, sealType);
         }
-        
+
         // Issue seal with delegate as evaluator (transparent chain)
         sealId = _issueSeal(subject, msg.sender, sealType, quadrant, evidenceHash, score, expiresAt);
-        
+
         emit SealIssuedByDelegate(sealId, delegator, msg.sender);
     }
 
@@ -825,11 +788,11 @@ contract SealRegistry is Ownable, EIP712 {
      * @param sealType Seal type to check
      * @return True if delegate can issue this seal type on behalf of delegator
      */
-    function isDelegateAuthorizedForType(
-        address delegator,
-        address delegate,
-        bytes32 sealType
-    ) external view returns (bool) {
+    function isDelegateAuthorizedForType(address delegator, address delegate, bytes32 sealType)
+        external
+        view
+        returns (bool)
+    {
         return _delegatedSealTypes[delegator][delegate][sealType];
     }
 
@@ -861,62 +824,62 @@ contract SealRegistry is Ownable, EIP712 {
      * @param signature EIP-712 signature from the evaluator
      * @return sealId The unique identifier assigned to the new seal
      */
-    function submitSealWithSignature(
-        MetaTxParams calldata params,
-        bytes calldata signature
-    ) external returns (uint256 sealId) {
+    function submitSealWithSignature(MetaTxParams calldata params, bytes calldata signature)
+        external
+        returns (uint256 sealId)
+    {
         if (block.timestamp > params.deadline) revert DeadlineExpired();
         if (!validSealTypes[params.sealType]) revert InvalidSealType(params.sealType);
         if (params.score > 100) revert InvalidScore(params.score);
         if (params.quadrant > 3) revert InvalidSealType(params.sealType);
-        
+
         // Recover evaluator from EIP-712 signature
         address evaluator = _recoverMetaTxSigner(params, signature);
-        
+
         // Verify nonce
         if (nonces[evaluator] != params.nonce) revert InvalidNonce();
         nonces[evaluator]++;
-        
+
         // Validate agent permissions for agent quadrants
         Quadrant q = Quadrant(params.quadrant);
         _validateMetaTxAgent(evaluator, params.sealType, params.subject, q);
-        
-        sealId = _issueSeal(params.subject, evaluator, params.sealType, q, params.evidenceHash, params.score, params.expiresAt);
-        
+
+        sealId = _issueSeal(
+            params.subject, evaluator, params.sealType, q, params.evidenceHash, params.score, params.expiresAt
+        );
+
         emit MetaTxSealSubmitted(sealId, evaluator, msg.sender);
     }
 
     /**
      * @dev Recover signer from EIP-712 meta-transaction signature
      */
-    function _recoverMetaTxSigner(
-        MetaTxParams calldata params,
-        bytes calldata signature
-    ) private view returns (address) {
-        bytes32 structHash = keccak256(abi.encode(
-            SEAL_TYPEHASH,
-            params.subject,
-            params.sealType,
-            params.quadrant,
-            params.score,
-            params.evidenceHash,
-            params.expiresAt,
-            params.nonce,
-            params.deadline
-        ));
-        
+    function _recoverMetaTxSigner(MetaTxParams calldata params, bytes calldata signature)
+        private
+        view
+        returns (address)
+    {
+        bytes32 structHash = keccak256(
+            abi.encode(
+                SEAL_TYPEHASH,
+                params.subject,
+                params.sealType,
+                params.quadrant,
+                params.score,
+                params.evidenceHash,
+                params.expiresAt,
+                params.nonce,
+                params.deadline
+            )
+        );
+
         return ECDSA.recover(_hashTypedDataV4(structHash), signature);
     }
 
     /**
      * @dev Validate agent permissions for meta-transaction seals
      */
-    function _validateMetaTxAgent(
-        address evaluator,
-        bytes32 sealType,
-        address subject,
-        Quadrant q
-    ) private view {
+    function _validateMetaTxAgent(address evaluator, bytes32 sealType, address subject, Quadrant q) private view {
         if (q == Quadrant.A2H || q == Quadrant.A2A) {
             IIdentityRegistry.AgentInfo memory agentInfo = identityRegistry.resolveByAddress(evaluator);
             if (agentInfo.agentId == 0) revert AgentNotRegistered(evaluator);
@@ -935,16 +898,16 @@ contract SealRegistry is Ownable, EIP712 {
      * @param signatures Array of EIP-712 signatures (one per params entry)
      * @return sealIds Array of created seal IDs
      */
-    function batchSubmitSealsWithSignatures(
-        MetaTxParams[] calldata params,
-        bytes[] calldata signatures
-    ) external returns (uint256[] memory sealIds) {
+    function batchSubmitSealsWithSignatures(MetaTxParams[] calldata params, bytes[] calldata signatures)
+        external
+        returns (uint256[] memory sealIds)
+    {
         uint256 len = params.length;
         if (len != signatures.length) revert BatchLengthMismatch();
         if (len == 0 || len > 20) revert BatchSizeInvalid(len);
-        
+
         sealIds = new uint256[](len);
-        
+
         for (uint256 i = 0; i < len; i++) {
             sealIds[i] = this.submitSealWithSignature(params[i], signatures[i]);
         }
@@ -976,35 +939,34 @@ contract SealRegistry is Ownable, EIP712 {
      * @return weightedScore The time-weighted average score (0-100, scaled by 100 for precision)
      * @return activeCount Number of active seals counted
      */
-    function timeWeightedScore(
-        address subject,
-        uint256 halfLifeSeconds,
-        bool filterQuadrant,
-        Quadrant quadrant
-    ) external view returns (uint256 weightedScore, uint256 activeCount) {
+    function timeWeightedScore(address subject, uint256 halfLifeSeconds, bool filterQuadrant, Quadrant quadrant)
+        external
+        view
+        returns (uint256 weightedScore, uint256 activeCount)
+    {
         require(halfLifeSeconds > 0, "Half-life must be positive");
-        
+
         uint256[] storage sealIds = _subjectSeals[subject];
         uint256 weightedSum = 0;
         uint256 totalWeight = 0;
-        
+
         for (uint256 i = 0; i < sealIds.length; i++) {
             Seal memory seal = _seals[sealIds[i]];
-            
+
             if (seal.revoked) continue;
             if (seal.expiresAt != 0 && block.timestamp > seal.expiresAt) continue;
             if (filterQuadrant && seal.quadrant != quadrant) continue;
-            
+
             // Hyperbolic decay: weight = halfLife / (halfLife + age)
             // Multiply by 1e18 for precision
             uint256 age = block.timestamp - seal.issuedAt;
             uint256 weight = (halfLifeSeconds * 1e18) / (halfLifeSeconds + age);
-            
+
             weightedSum += uint256(seal.score) * weight;
             totalWeight += weight;
             activeCount++;
         }
-        
+
         if (totalWeight > 0) {
             weightedScore = weightedSum / totalWeight;
         }

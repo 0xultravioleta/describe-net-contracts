@@ -89,13 +89,7 @@ interface IERC8004ReputationAdapter {
         string calldata tag1,
         string calldata tag2,
         bytes32 feedbackHash
-    ) external view returns (
-        address subject,
-        bytes32 sealType,
-        uint8 quadrant,
-        uint8 score,
-        bytes32 evidenceHash
-    );
+    ) external view returns (address subject, bytes32 sealType, uint8 quadrant, uint8 score, bytes32 evidenceHash);
 
     /**
      * @dev Check if a tag1 (seal type) is valid
