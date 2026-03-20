@@ -450,6 +450,30 @@ contract SealRegistry is Ownable, EIP712 {
         emit SealRevoked(sealId, msg.sender, reason);
     }
 
+    /// @dev Address authorized to revoke seals via challenge resolution
+    address public challengeRevoker;
+
+    /// @notice Set the challenge revoker (typically the SealChallenge contract)
+    /// @param revoker Address authorized to revoke via challenge
+    function setChallengeRevoker(address revoker) external onlyOwner {
+        challengeRevoker = revoker;
+    }
+
+    /// @notice Revoke a seal via an authorized challenge system
+    /// @dev Only callable by the designated challenge revoker contract
+    /// @param sealId The seal to revoke
+    /// @param reason Reason from the challenge resolution
+    function revokeSealByChallenge(uint256 sealId, string calldata reason) external {
+        require(msg.sender == challengeRevoker, "SealRegistry: not challenge revoker");
+        Seal storage seal = _seals[sealId];
+        if (seal.evaluator == address(0)) revert SealNotFound(sealId);
+        if (seal.revoked) revert SealAlreadyRevoked(sealId);
+
+        seal.revoked = true;
+
+        emit SealRevoked(sealId, address(0), reason);
+    }
+
     /**
      * @dev Register which seal types an agent can issue
      * @param sealTypes Array of seal types the agent can issue
